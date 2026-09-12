@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Checks for the news share lane (2026-09-11).
+"""WARNING: By default this test launches the live browser profile and accesses x.com.
+Run with "offline" argument to skip live checks and avoid touching the live profile or network.
 
-Part 1 (offline): the 10% budget, comment hygiene, query extraction, freshness.
-Part 2 (live, publishes NOTHING): take a real story off the feeds, find the
-source's own X post, generate the comment, open the quote composer and stop one
-click short of posting (browser_share.quote(dry=True)).
+Behaviour under test:
+Validates the news share (quote tweet) lane logic across news_monitor and browser_share:
+- 10% share volume cap (nm.share_allowed): guarantees shares never exceed 10% of total posts.
+- Comment hygiene (nm.clean_comment): enforces length, strips em dashes, rejects URLs/hashtags.
+- Search phrase extraction (nm.news_query): extracts concise entity terms from RSS headlines.
+- Source freshness (nm._fresh_enough) and source allowlist (nm.SHARE_SOURCES).
+- Live dry run (live_dry): searches X and stages a quote in the composer with dry=True.
 
-Run: python3 scripts/test_share_lane.py           # both parts
-     python3 scripts/test_share_lane.py offline   # no browser
+How to run:
+    python scripts/test_share_lane.py           # Runs both offline and live dry tests
+    python scripts/test_share_lane.py offline   # Runs offline checks only (no browser/network)
+Live checks require Playwright, network access to RSS feeds and x.com, and the live profile.
+
+What a failure means in practice:
+Offline failure means editorial gates or volume caps are broken. Live failure means RSS feeds,
+X search scraping, or quote tweet DOM interaction broke on current X markup.
 """
 import os
 import sys
@@ -22,6 +32,7 @@ fails = []
 
 
 def check(name, got, want):
+    """Assert actual equals expected, logging failures to fails list."""
     ok = got == want
     print(f"{'ok  ' if ok else 'FAIL'} {name}: got {got!r} want {want!r}")
     if not ok:
@@ -29,6 +40,7 @@ def check(name, got, want):
 
 
 def offline():
+    """Verify share budget caps, comment sanitization, search queries, and freshness."""
     print("== 10% share budget ==")
     # The first share needs 9 plain posts behind it, then 19, then 29.
     check("0 posts, 0 shares -> no share", nm.share_allowed({}), False)
@@ -92,7 +104,7 @@ def offline():
 
 
 def live_dry():
-    """Real feeds -> real X search -> real composer, without publishing."""
+    """Verify live feed parsing, X search, and quote composer staging without posting."""
     print("\n== live dry run (nothing is posted) ==")
     items = []
     for name, url in nm.FEEDS.items():

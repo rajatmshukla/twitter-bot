@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
-"""Prove the run budget fires through the REAL main() and still exits cleanly.
+"""Verification that the execution budget cleanly terminates candidate loops in main().
 
-Runs main() with a deliberately tiny budget so the guard trips early, with the
-post step CAPTURED instead of published and state writes suppressed. Asserts
-the run self-terminates and reaches the post stage rather than being killed by
-the cron wrapper's 1800s timeout (the 2026-09-10 failure).
+This script accesses the network for scraping but does not post or mutate state.
+Run with:
+    python scripts/verify_budget_run.py
 
-Costs ~2-3 min. Publishes nothing.
+Behaviour under test:
+Executes the production reply_guy_direct.main() routine with a reduced 120s budget:
+- Overrides post_batch to capture drafts without publishing to X.
+- Overrides save_state to avoid persisting state mutations.
+- Confirms the engine logs a "budget spent" event and cleanly terminates candidate loops.
+- Asserts main() returns exit code 0 in well under the cron timeout (takes ~2-3 minutes).
+
+Why this matters:
+Pins down the fix for the 2026-09-10 timeout failure, where candidate generation overrun
+caused the cron wrapper to kill the process at 1800s, dropping all generated drafts.
+
+What a failure means in practice:
+Candidate generation loops are ignoring the deadline, risking hard process termination by the
+cron wrapper and complete loss of all generated drafts.
 """
 import sys, time
 
@@ -19,6 +31,7 @@ logs = []
 
 
 def fake_post_batch(items):
+    """Capture candidate items in memory and simulate successful posting responses."""
     captured.extend(items)
     return [(tid, f"would-be-{tid}") for tid, _ in items], [], None
 

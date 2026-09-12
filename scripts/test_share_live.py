@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
-"""End-to-end live test of the repost / quote path (2026-09-11).
+"""WARNING: This test modifies the live X account (@first_sauce_lab) by reposting and quoting.
+Do not run casually; it creates live activity and requires active credentials.
 
-Everything runs against the ACCOUNT'S OWN newest post, so no outside author
-gets a notification:
+Behaviour under test:
+End-to-end verification of browser automation for reposts and quote tweets on x.com:
+1. Repost the account's newest tweet and verify state flips to reposted.
+2. Undo the repost and verify state flips back.
+3. Quote the tweet with test commentary and capture the newly created status ID.
+4. Verify the quote renders properly with the attached quote card.
+5. Delete the published quote tweet and verify HTTP 404 via curl.
 
-  1. repost the own post            -> state must flip to "reposted"
-  2. undo that repost               -> state must flip back to "not"
-  3. quote the own post (test text) -> a new post id must come back
-  4. verify the new post renders with the quoted card
-  5. delete the test quote          -> status URL must return HTTP 404
+Why this matters:
+X frontend markup and ARIA labels change frequently. This script validates that Playwright
+selectors for menus, repost buttons, quote composers, and tweet deletion remain functional.
+Running against the account's own post ensures no outside users receive notifications.
 
-Writes tmp/share_live_report.json. Takes the shared browser lock so a cron
-job cannot collide with it.
+How to run:
+    python scripts/test_share_live.py
+Requires: Live logged-in Chromium profile for @first_sauce_lab, network access, and curl.
+Acquires browser lock and writes results to tmp/share_live_report.json.
+
+What a failure means in practice:
+Production quote posts or reposts will fail to publish, or test tweets will remain publicly
+visible on the account timeline if deletion automation fails.
 """
 import json
 import os
@@ -33,6 +44,7 @@ REPORT = os.path.join(BOT, "tmp", "share_live_report.json")
 
 
 def own_newest_status(page):
+    """Scrape the account timeline to find the status URL of the newest own post."""
     page.goto(f"https://x.com/{HANDLE}", wait_until="domcontentloaded", timeout=60_000)
     time.sleep(3)
     return page.evaluate("""(h) => {
@@ -46,12 +58,14 @@ def own_newest_status(page):
 
 
 def http_code(url):
+    """Return HTTP status code for a URL via curl to verify post deletion (404)."""
     r = subprocess.run(["curl", "-s", "-o", os.devnull, "-w", "%{http_code}",
                         "-L", url], capture_output=True, text=True, timeout=60)
     return r.stdout.strip()
 
 
 def main():
+    """Run end-to-end live repost, quote, render check, and deletion test."""
     rep = {"when": time.strftime("%Y-%m-%dT%H:%M:%S")}
     if not reply_guy.acquire_browser_lock():
         print("browser busy (lock held) — aborting")

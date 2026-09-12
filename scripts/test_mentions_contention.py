@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
-"""Regression tests for the 2026-09-11 13:41 mentions-guy failure.
+"""WARNING: This test launches the live browser profile and accesses x.com.
+Do not run casually, because it interacts with the active session on x.com.
 
-That run printed "NOT LOGGED IN - run browser_login.py" and exited 2, which
-sent a red cron alert to Discord. The login was never broken. A one-shot
-verify_x_account.py run held the same Chromium profile; the mentions engine
-opened it second and got a logged-out shell.
+Behaviour under test:
+Regression tests for mentions_guy and browser_guard handling profile contention.
+When another process holds the Chromium profile, opening it second yields an unauthenticated
+shell. This test verifies that the engine stands down silently on contention rather than firing
+false "NOT LOGGED IN" Discord alerts, while still alerting (exit 2) if stalls persist.
 
-Cases, all with real processes:
+Real process cases tested:
+  Case C: Stale lock left by a dead process is taken over immediately.
+  Case A: Lock held by another engine causes silent stand-down (exit 0, no stdout).
+  Case B: Profile held by an unlocked intruder is treated as contention (exit 0, silent).
+  Case D: Profile unusable consecutively (streak >= 2) triggers stalled alert (exit 2).
 
-  C. lock left by a dead process  -> taken over immediately, not after 45 min.
-                                     (A cron timeout kill cannot run atexit.)
-  A. lock held by another engine  -> stand down SILENTLY: exit 0, no stdout.
-  B. profile held by an intruder  -> first sighting is treated as contention:
-     that ignores the lock            silent, exit 0, no alert.
-  D. same, with the profile already unusable twice in a row -> "stalled":
-                                     the engine finally speaks, exit 2.
+How to run:
+    python scripts/test_mentions_contention.py
+Requires: Live logged-in Chromium profile, network access to x.com, and Playwright.
+Temporarily modifies and restores browser_guard.HEALTH_FILE.
 
-B and D together are the point. B is why the false alarm disappears. D is why
-it cannot hide a real expiry behind silence forever.
-
-Usage: python3 scripts/test_mentions_contention.py
+What a failure means in practice:
+False alarms will wake the on-call channel during routine contention, crashed processes
+will orphan locks blocking future runs, or real authentication loss will go unnoticed.
 """
 import json, os, shutil, subprocess, sys, textwrap, time
 
@@ -33,6 +35,7 @@ FAILS = []
 
 
 def check(label, got, want):
+    """Assert actual equals expected, logging failures to FAILS list."""
     ok = got == want
     print(f"{'ok  ' if ok else 'FAIL'} {label}: got {got!r} want {want!r}")
     if not ok:
@@ -40,6 +43,7 @@ def check(label, got, want):
 
 
 def clear_lock():
+    """Remove browser guard lock file if present to guarantee a clean baseline."""
     try:
         os.remove(g.LOCK_FILE)
     except OSError:
@@ -47,6 +51,7 @@ def clear_lock():
 
 
 def run_engine(timeout=600):
+    """Execute mentions_guy.py in a child process with MENTIONS_DRY_RUN unset."""
     env = dict(os.environ)
     env.pop("MENTIONS_DRY_RUN", None)  # production path
     r = subprocess.run([PY, ENGINE], capture_output=True, text=True,
@@ -55,7 +60,7 @@ def run_engine(timeout=600):
 
 
 def spawn_intruder():
-    """A process holding the PROFILE without taking the lock: the 13:41 shape."""
+    """Spawn a background process holding the live profile without taking the lock."""
     p = subprocess.Popen(
         [PY, "-c", textwrap.dedent(f"""
             import sys, time
@@ -79,6 +84,7 @@ def spawn_intruder():
 
 
 def case_c_dead_holder():
+    """Verify that a lock file left behind by a dead PID is claimed immediately."""
     print("\n== C. lock left behind by a killed process ==")
     clear_lock()
     with open(g.LOCK_FILE, "w", encoding="utf-8") as f:
@@ -93,6 +99,7 @@ def case_c_dead_holder():
 
 
 def case_a_lock_held():
+    """Verify mentions_guy exits 0 silently without alerts when lock is held."""
     print("\n== A. lock held by another engine ==")
     holder = subprocess.Popen(
         [PY, "-c", textwrap.dedent(f"""
@@ -121,7 +128,7 @@ def case_a_lock_held():
 
 
 def case_b_and_d(intruder):
-    """B: first sighting -> silent. D: while already stalled -> alert."""
+    """Verify contention stays silent on first hit (B) but alerts when stalled (D)."""
     g._save_health({"last_ok": None, "consecutive_unusable": 0})
     print("\n== B. profile held by an intruder that ignores the lock (streak 0) ==")
     rc, out, err = run_engine()
@@ -146,6 +153,7 @@ def case_b_and_d(intruder):
 
 
 def main():
+    """Run lock contention test suite, backing up and restoring health state."""
     health_before = None
     if os.path.exists(g.HEALTH_FILE):
         health_before = open(g.HEALTH_FILE, encoding="utf-8").read()

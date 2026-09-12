@@ -1,8 +1,22 @@
 #!/usr/bin/env python3
-"""Offline check of the new filter/gate logic. No browser, no posting, no network.
+"""Offline validation of engagement filters, content gates, and browser locking.
 
-Covers the paths that decide whether a real person gets an auto-reply, which is
-the part worth being sure about before this runs unattended.
+This test does not hit the live account, network, or browser.
+Run with:
+    python scripts/test_engagement_filters.py
+
+Behaviour under test:
+Pins down offline filtering and safety gate rules in mentions_guy and reply_guy_direct:
+- Mention freshness window (mg.fresh) to ignore stale conversations.
+- Junk and spam filters (mg.is_junk) blocking crypto promotions, follow bait, and raw handles.
+- Sycophantic opening phrase gate (mg.THANKS_OPENERS) rejecting bland canned replies.
+- News article quality checks (rgd._news_quality_ok) rejecting non-English or empty items.
+- Search phrase extraction (rgd._search_phrase) deriving targeted queries from headlines.
+- Browser lock acquisition and release (reply_guy) preventing concurrent profile access.
+
+What a failure means in practice:
+A failure means safety gates could let junk or sycophantic replies reach production users,
+poor search terms could pollute news queries, or concurrent runs could corrupt browser state.
 """
 import sys, os, datetime
 sys.path.append(r"C:\Users\Rajat\twitter-bot")
@@ -13,6 +27,7 @@ fails = []
 
 
 def check(label, got, want):
+    """Assert actual equals expected, reporting mismatches and tracking failure labels."""
     ok = got == want
     print(f"{'ok  ' if ok else 'FAIL'} {label}: got {got!r} want {want!r}")
     if not ok:
@@ -21,6 +36,7 @@ def check(label, got, want):
 
 now = datetime.datetime.now(datetime.timezone.utc)
 def iso(hours_ago):
+    """Produce an ISO-8601 UTC timestamp string offset by hours_ago for freshness checks."""
     return (now - datetime.timedelta(hours=hours_ago)).isoformat().replace("+00:00", "Z")
 
 print("== freshness window ==")

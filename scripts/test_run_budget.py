@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
-"""Unit checks for the run budget + agy per-run cap (2026-09-10 timeout fix).
+"""Offline unit checks for run budget and per-run antigravity call caps.
 
-Why this exists: the 14:00 run on 2026-09-10 died at the wrapper's 1800s kill
-with exit 1, discarding every draft and posting nothing. The agy fallback cost
-~2.5 min per cycle and was tried for every candidate that fell through, on top
-of a ~16 min scrape. These checks pin the guards that bound a run.
+This test does not hit the live account, network, or browser.
+Run with:
+    python scripts/test_run_budget.py
+
+Behaviour under test:
+Pins runtime budget guards and subprocess execution limits in reply_guy_direct:
+- rd.budget_spent(): verifies that time limits are obeyed when a deadline is reached.
+- rd._antigravity() call cap: blocks repeated slow LLM calls once AGY_MAX_PER_RUN is met.
+- rd._antigravity() budget gate: skips LLM invocation entirely once the budget deadline passes.
+- rd.RUN_BUDGET_S and AGY_MAX_PER_RUN bounds: ensures limits stay well below the wrapper timeout.
+
+Why this matters:
+Without these guards, candidate generation after long scraping runs can trigger the cron
+wrapper's 1800-second hard kill, discarding all drafts without publishing anything.
+
+What a failure means in practice:
+A failure means reply_guy_direct could overrun its execution window during slow LLM cycles,
+causing the task runner to terminate the process and lose all drafted posts.
 """
 import sys, time
 
@@ -15,6 +29,7 @@ fails = []
 
 
 def check(name, got, want):
+    """Assert actual equals expected, logging failures to fails list."""
     ok = got == want
     print(f"{'ok  ' if ok else 'FAIL'} {name}: got {got!r} want {want!r}")
     if not ok:

@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
-"""Verify a first_sauce_lab post exists and carries an attached quoted post.
+"""WARNING: This script launches the live browser profile and accesses x.com with your account.
+Do not run casually, although it only inspects status pages and never publishes or mutates posts.
 
-Reads the status page, checks structure, and saves a screenshot so the layout
-can be seen rather than inferred.
+Behaviour under test:
+Validates that a published status on @first_sauce_lab includes an attached quoted tweet card.
+Extracts focal tweet DOM structure, verifies mention of the quoted handle or external status
+link, and captures a verification screenshot to tmp/verify_<status_id>.png.
 
-  python3 scripts/verify_share_post.py <status_id>
+Why this matters:
+X quoted cards do not render as standard nested articles and may omit status links in the DOM.
+This check ensures quote tweets rendered as rich embedded cards rather than plain text.
+
+How to run:
+    python scripts/verify_share_post.py <status_id> [<quoted_handle>]
+Requires: Live logged-in Chromium profile, network access to x.com, and Playwright.
+Acquires browser_guard lock.
+
+What a failure means in practice:
+Exit 0: Quote card successfully verified.
+Exit 1: Quote card not detected in DOM (the quote may have degraded to plain text).
+Exit 2: Browser session dead or unusable.
+Exit 4: Missing required status_id argument.
 """
 import json, os, sys, time
 
@@ -16,6 +32,7 @@ from playwright.sync_api import sync_playwright
 
 
 def main():
+    """Inspect the live status page for a quoted tweet card and take a screenshot."""
     sid = sys.argv[1] if len(sys.argv) > 1 else None
     if not sid:
         print("usage: verify_share_post.py <status_id>")

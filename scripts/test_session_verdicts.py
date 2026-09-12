@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Prove browser_guard.classify_session separates 'busy' from 'dead'.
+"""WARNING: This test launches the live browser profile and accesses x.com.
+Do not run casually, although it reads session state only and never posts.
 
-Both cases are real, not simulated by monkeypatching the classifier:
+Behaviour under test:
+Verifies that browser_guard.classify_session accurately distinguishes session states:
+- "dead": A clean context without auth cookies immediately classifies as dead on attempt 1.
+- "busy": A live profile with auth cookies but blocked JS exhausts retries and classifies as busy.
+- "ok": A normal authenticated live profile evaluates cleanly to ok within two tries.
 
-  dead  : a throwaway context with no cookies. That is exactly what an expired
-          login looks like.
-  busy  : the REAL profile with JavaScript blocked via page.route. The HTML
-          loads and the auth cookie is present, but the React app never
-          hydrates, so no logged-in marker ever appears. That is exactly what
-          profile contention looks like from inside the page.
+Why this matters:
+When another process holds the profile, the React app fails to hydrate despite valid cookies.
+If misclassified as dead, it fires false "NOT LOGGED IN" Discord alerts. True expired logins
+must be identified immediately on attempt 1 without burning unnecessary retries.
 
-Never posts anything.
+How to run:
+    python scripts/test_session_verdicts.py
+Requires: Live logged-in Chromium profile, network access to x.com, and Playwright.
+Acquires browser_guard lock. Never publishes or mutates any tweets.
 
-  python3 scripts/test_session_verdicts.py
+What a failure means in practice:
+Transient lock contention could wake engineers with false alarms, or expired credentials
+could waste execution time looping through retries before reporting failure.
 """
 import os, sys, json
 
@@ -26,6 +34,7 @@ FAILS = []
 
 
 def check(label, got, want):
+    """Assert actual equals expected, logging failures to FAILS list and returning success."""
     ok = got == want
     print(f"{'ok  ' if ok else 'FAIL'} {label}: got {got!r} want {want!r}")
     if not ok:
@@ -34,7 +43,7 @@ def check(label, got, want):
 
 
 def case_dead(p):
-    """No cookies at all -> dead, and fast (must not burn 3 retries)."""
+    """Verify a cookie-free context classifies as dead immediately on attempt 1."""
     import time
     ctx = p.chromium.launch()
     page = ctx.new_page()
@@ -50,7 +59,7 @@ def case_dead(p):
 
 
 def case_busy(p):
-    """Real profile, JS blocked -> busy, and it must retry before giving up."""
+    """Verify a real profile with blocked JS exhausts retries and classifies as busy."""
     ctx = p.chromium.launch_persistent_context(
         browser_post.PROFILE, headless=True,
         viewport={"width": 1280, "height": 900})
@@ -69,7 +78,7 @@ def case_busy(p):
 
 
 def case_ok(p):
-    """Untouched real profile -> ok."""
+    """Verify an unblocked live profile is recognized as authenticated ok."""
     ctx = p.chromium.launch_persistent_context(
         browser_post.PROFILE, headless=True,
         viewport={"width": 1280, "height": 900})
@@ -81,6 +90,7 @@ def case_ok(p):
 
 
 def main():
+    """Acquire browser guard lock and execute dead, busy, and ok session tests."""
     if not g.acquire("test_session_verdicts"):
         print(f"SKIP: {g.busy_reason()}")
         return 0
