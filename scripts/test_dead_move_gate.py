@@ -20,6 +20,14 @@ if BOT_DIR not in sys.path:
 import reply_guy as rg
 import reply_guy_direct as rgd
 
+ESCAPE_VARIANTS = [
+    'that phrase is doing some work.',
+    'the word "efficient" is doing so much work here.',
+    'the phrase "state of the art" is doing a ton of work.',
+    'that claim is doing a huge amount of work.',
+    'that framing is doing an enormous amount of work.',
+]
+
 TEXTS_A = [
     '"first attempt" is doing a lot of work there. Still, very cool to see the "in-context" part scale to physical space like this.',
     '"Could actually help humanity in practice" is doing a lot of heavy lifting.',
@@ -30,7 +38,7 @@ TEXTS_A = [
     'the byte-stable prefix is the real trick. the cache does the heavy lifting.',
     '"game changer" is doing a lot of work for a pricing announcement.',
     'the ellipses are doing a lot of emotional heavy lifting there',
-]
+] + ESCAPE_VARIANTS
 
 TEXTS_B = [
     '$100 a seat, and the $20 plan turns out to have been the demo. that is the whole announcement.',
