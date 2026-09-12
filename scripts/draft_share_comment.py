@@ -37,6 +37,7 @@ QUOTED POST by @{handle}:
 
 
 def draft(handle, text, n=3):
+    """Query DeepSeek to generate quote comments and return those passing news_monitor hygiene."""
     import news_monitor as nm
     out = []
     for i in range(n):
@@ -54,6 +55,12 @@ def draft(handle, text, n=3):
 
 
 def main():
+    """Scrape a tweet and draft quote-tweet candidate comments without posting.
+
+    Runs against a target tweet URL using a logged-in Playwright session under browser guard.
+    Generates n comment variations via DeepSeek and filters them through news hygiene checks.
+    Prints comment options to stdout and saves them to tmp/share_comment_options.json.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--n", type=int, default=3)

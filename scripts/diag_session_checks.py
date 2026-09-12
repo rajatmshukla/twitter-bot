@@ -25,6 +25,7 @@ MARKERS = {
 
 
 def markers(page):
+    """Query counts of key Twitter navigation and login DOM selectors on the page."""
     out = {}
     for name, sel in MARKERS.items():
         try:
@@ -35,6 +36,7 @@ def markers(page):
 
 
 def dump(page, label):
+    """Print page URL, title, DOM marker counts, and cookie tally under a labeled header."""
     print(f"--- {label} ---")
     try:
         print(f"url   : {page.url}")
@@ -49,6 +51,12 @@ def dump(page, label):
 
 
 def main():
+    """Run both reply_guy and browser_post session checks to diagnose login issues.
+
+    Drives a headless Chromium session against the local profile, testing each checker
+    on separate pages. Prints check durations, DOM markers, cookie counts, and a verdict
+    to stdout. Posts nothing and makes no disk changes.
+    """
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
             rg.PROFILE, headless=True, viewport={"width": 1280, "height": 900},

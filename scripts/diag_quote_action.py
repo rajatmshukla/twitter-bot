@@ -34,12 +34,19 @@ LIST_JS = """(h) => {
 
 
 def newest_ids(page):
+    """Navigate to the profile page and scrape recent tweet IDs via JavaScript evaluation."""
     page.goto("https://x.com/first_sauce_lab", wait_until="domcontentloaded", timeout=60_000)
     time.sleep(4)
     return page.evaluate(LIST_JS, "first_sauce_lab")
 
 
 def main():
+    """Drive an instrumented quote-post action to diagnose composer click behavior.
+
+    Runs against a logged-in Playwright session on an owned tweet while holding browser lock.
+    Captures pre/post screenshots to tmp/ and writes diagnostic JSON to tmp/quote_diag.json.
+    Any resulting quote tweet is deleted immediately to leave the account clean.
+    """
     rep = {}
     if not reply_guy.acquire_browser_lock():
         print("browser busy")

@@ -22,6 +22,11 @@ DAYS = 86400  # Chromium expires_utc is microseconds since 1601-01-01
 
 
 def chrome_time_to_iso(v):
+    """Convert a Chromium timestamp in microseconds since 1601-01-01 UTC to an ISO string.
+
+    Adds integer microseconds v as a timedelta to the 1601-01-01 00:00:00 UTC epoch,
+    returning a timezone-aware ISO 8601 string or None on failure or empty input.
+    """
     if not v:
         return None
     try:
@@ -33,6 +38,12 @@ def chrome_time_to_iso(v):
 
 
 def main():
+    """Inspect the local Chromium cookie database on disk for valid Twitter login sessions.
+
+    Drives SQLite read-only queries against candidate profile paths without launching Chromium.
+    Checks database integrity, counts cookies, and checks expiration of x.com auth tokens.
+    Prints file stats, table integrity, and cookie rows to stdout. Writes nothing to disk.
+    """
     found = False
     for path in CANDIDATES:
         if not os.path.exists(path):

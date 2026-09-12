@@ -48,6 +48,7 @@ results = []
 
 
 def check(layer, ok, detail=""):
+    """Record a test assertion result into results list and log PASS or FAIL status."""
     results.append((layer, ok, detail))
     print(f"[{'PASS' if ok else 'FAIL'}] {layer}" + (f" :: {detail}" if detail else ""))
 
@@ -101,6 +102,7 @@ if 3 in WANT:
     captured = []
 
     def fake_post_batch(takes):
+        """Mock rd.post_batch to collect generated takes without publishing to X."""
         captured.extend(takes)
         return [(tid, f"https://x.com/i/status/{tid}") for tid, _ in takes], [], None
 
@@ -108,6 +110,7 @@ if 3 in WANT:
     loglines = []
 
     def capture_log(msg):
+        """Intercept reply engine log messages into loglines and print with engine prefix."""
         loglines.append(msg)
         print(f"---     engine log: {msg}")
 

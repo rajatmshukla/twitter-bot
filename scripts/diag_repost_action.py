@@ -22,12 +22,19 @@ OUT = os.path.join(BOT, "tmp", "repost_diag.json")
 
 
 def shots(page, tag):
+    """Capture a screenshot to tmp/diag_{tag}.png and return the resulting file path."""
     path = os.path.join(BOT, "tmp", f"diag_{tag}.png")
     page.screenshot(path=path)
     return path
 
 
 def main():
+    """Drive a single instrumented repost action and undo it to verify button wiring.
+
+    Runs against a logged-in Playwright session on an owned tweet while holding browser lock.
+    Captures screenshots to tmp/ and writes diagnostic details to tmp/repost_diag.json.
+    Undoes any successful repost immediately so the account remains unchanged.
+    """
     rep = {}
     if not reply_guy.acquire_browser_lock():
         print("browser busy")

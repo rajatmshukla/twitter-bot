@@ -1,6 +1,12 @@
+"""Fetch and parse RSS feed items from a given URL via HTTP request.
+
+Extracts titles, links, and descriptions for up to 15 items and prints them to stdout.
+CLI usage: python scripts/rss_fetch.py [feed_url]
+"""
 import re, sys, urllib.request
 
 def fetch(url):
+    """Retrieve feed content over HTTP with a browser User-Agent header and return decoded text."""
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     return urllib.request.urlopen(req, timeout=25).read().decode('utf-8', 'replace')
 
@@ -12,6 +18,7 @@ for it in items[:15]:
     l = re.search(r'<link>(.*?)</link>', it, re.S)
     d = re.search(r'<description>(.*?)</description>', it, re.S)
     def clean(s):
+        """Strip HTML tags and convert common HTML entities to plain characters."""
         s = re.sub(r'<[^>]+>', '', s)
         s = re.sub(r'&amp;', '&', s)
         s = re.sub(r'&#8217;|&#39;', "'", s)

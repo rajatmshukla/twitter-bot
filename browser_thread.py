@@ -95,6 +95,10 @@ def post_one(page, text, reply_to=None):
         return None
     btn.click()
     def _poll_confirm(max_s):
+        """Poll for post completion via toast link or cleared composer for up to max_s seconds.
+
+        Returns (confirmed, tweet_id, signal) tuple where confirmed is True on success.
+        """
         start = time.time()
         while time.time() - start < max_s:
             try:
