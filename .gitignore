@@ -1,0 +1,34 @@
+# Firecrawl cache
+.firecrawl/
+
+# Secrets — API keys, sessions, cookies
+.env
+*.env
+cookies*.json
+*session*.json
+*secret*
+*credential*
+
+# Python
+__pycache__/
+*.pyc
+
+# --- added 2026-09-12: keep this repo code-only so every agy run yields a
+# reviewable diff. Bulk data and runtime output stay untracked on purpose.
+# browser-profile/ is 848 MB and holds the logged-in X session. ---
+browser-profile/
+assets/
+tmp/
+logs/
+drafts/
+agy_runs/
+research/
+_take_archive/
+MOCHI_TWITTER_PLAYBOOK.txt
+MOCHI_TWITTER_PLAYBOOK.zip
+*.zip
+*.log
+*.err
+run_scrape_*.json
+run_trending_*.json
+state*.json

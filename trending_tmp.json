@@ -1,0 +1,64 @@
+{
+ "candidates": [
+  {
+   "author": "thsottiaux",
+   "id": "2089500941842342287",
+   "text": "What is an obvious thing that we should do with Codex, API or our models that we should just do but haven't yet? What is 100% within reach, but we just seem to be missing?",
+   "time": "2026-08-17T23:53:40.000Z"
+  },
+  {
+   "author": "realNayem",
+   "id": "2089274484511412462",
+   "text": "grok 4.6 came out a few weeks ago and people are actually building insane stuff with it\n\n500k context window. configurable reasoning. same price as before. and the community has been going wild\n\nhere's what's been built so far:\n\nfull saas dashboards in one session. clone apps in",
+   "time": "2026-08-17T08:53:48.000Z"
+  },
+  {
+   "author": "GergelyOrosz",
+   "id": "2089478614848840145",
+   "text": "One reason code reviews will not hold up at many (most?) startups: coding agents (obviously) mean a LOT more PRs. And more verbose PRs. It\u2019s already less motivation to review AI-generated code\u2026 and so much of it?!!\n\nData from a new report by Linear: \nhttps://\nlinear.app/data",
+   "time": "2026-08-17T22:24:57.000Z"
+  },
+  {
+   "author": "aleximarkett",
+   "id": "2089380754069553336",
+   "text": "New week, same internet.\n\nSomeone will launch a new AI model and call it revolutionary.\n\nSomeone will see a slightly better benchmark and declare AGI is basically here.\n\nSomeone will turn $500 into $5,000 on a meme coin and become a \u201cgenius trader\u201d overnight.\n\nSomeone else will",
+   "time": "2026-08-17T15:56:05.000Z"
+  },
+  {
+   "author": "aiwithsally",
+   "id": "2089335488541007981",
+   "text": "AI models are getting ridiculously fast.\n\nSeeing Gemini 3.5 Flash-Lite at 356 tokens/sec is honestly wild. But what interests me more is how quickly speed is becoming a core part of the AI experience.\n\nI don't always need the smartest model available. Sometimes I just want an",
+   "time": "2026-08-17T12:56:13.000Z"
+  },
+  {
+   "author": "ChrisGPT",
+   "id": "2089447554383556838",
+   "text": "Anthropic is reportedly now on a $65B annualized revenue run rate, according to Bloomberg.\n\nThat\u2019s up more than 7x from the end of last year.\n\nThe run rate hit $65B by the end of July and was reportedly shared with investors as part of a regular company update.\n\nI thought",
+   "time": "2026-08-17T20:21:31.000Z"
+  },
+  {
+   "author": "nikunj",
+   "id": "2089486802356961364",
+   "text": "the models have no moat (OpenAI, Anthropic, XAI)\n\nthe IDEs have no moat (Cursor, Windsurf)\n\nthe harnesses have no moat (Cognition, Factory, LangChain)\n\nthe app builders have no moat (Replit, Lovable, Bolt)\n\nthe wrappers have no moat (Harvey, Abridge, OpenEvidence)\n\nthe inference",
+   "time": "2026-08-17T22:57:29.000Z"
+  },
+  {
+   "author": "_jasonwei",
+   "id": "2089429555371024577",
+   "text": "When language models first started using tools well, I was sympathetic to the narrative that instead of scaling up language models, all we needed was a strong enough \"cognitive core\", say 1B parameters, and anything else could be done with tool use, like browsing the internet or",
+   "time": "2026-08-17T19:10:00.000Z"
+  },
+  {
+   "author": "ziwenxu_",
+   "id": "2089277259173527851",
+   "text": "Command Code is now in Codex!!\n\nThe plan we're on is $1 a month. It comes with $10 of credits and around 15K requests.\n\nGPT-5.6 Luna is in it, the same model we just moved to when the OpenCode sub got cut, and Grok 4.5 sits in there too next to DeepSeek, Kimi, GLM and MiniMax.",
+   "time": "2026-08-17T09:04:50.000Z"
+  },
+  {
+   "author": "jturntdev",
+   "id": "2089099668739223603",
+   "text": "Trust me. If you do this, don\u2019t complain that your quota depletes 10x faster. \n\nI also believe it provides no real advantage.\n\nGPT 5.6 Sol, even with the 250k context, ain\u2019t great. Especially after few compactions.\n\nThey just want you to buy that 80$ reset even faster.\n\nStay",
+   "time": "2026-08-16T21:19:09.000Z"
+  }
+ ]
+}

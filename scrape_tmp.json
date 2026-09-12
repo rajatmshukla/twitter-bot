@@ -1,0 +1,28 @@
+{
+ "candidates": [
+  {
+   "handle": "elonmusk",
+   "id": "2089501024557912315",
+   "text": "Grok is very good at agentic tasks!",
+   "time": "2026-08-17T23:53:59.000Z"
+  },
+  {
+   "handle": "elonmusk",
+   "id": "2089500595224777127",
+   "text": "Create with Grok Imagine",
+   "time": "2026-08-17T23:52:17.000Z"
+  },
+  {
+   "handle": "kevinweil",
+   "id": "2089505737143935470",
+   "text": "This is spot on. It would be a shame if we get AGI for enterprise productivity and miss on AGI for scientific acceleration. Can't let it happen.",
+   "time": "2026-08-18T00:12:43.000Z"
+  },
+  {
+   "handle": "thsottiaux",
+   "id": "2089500941842342287",
+   "text": "What is an obvious thing that we should do with Codex, API or our models that we should just do but haven't yet? What is 100% within reach, but we just seem to be missing?",
+   "time": "2026-08-17T23:53:40.000Z"
+  }
+ ]
+}
