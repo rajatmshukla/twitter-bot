@@ -1,10 +1,31 @@
 #!/usr/bin/env python3
 """Full profile audit for @first_sauce_lab.
 
-Reads: follower/following counts, bio, avatar/banner presence, pinned badge,
-and per-post engagement (views/replies/reposts/likes) for recent posts.
-Prints JSON to stdout. Appends a row to logs/impressions.csv.
-Run with python3 (WindowsApps) - playwright lives there.
+Collects profile statistics and engagement metrics: follower and following counts,
+bio header text, avatar and banner presence, pinned post status, per-post engagement
+(views, likes, sample text) for up to 10 recent posts, and 7-day post impressions.
+Impressions are extracted from the profile 7-day banner when present, or summed
+across up to 8 individual post /analytics pages as a fallback.
+
+Invocation:
+    CLI or cron:
+        python3 profile_audit.py
+    Invoked daily every morning by impressions_cron.
+    Acquires browser_guard lock to prevent collisions with concurrent browser bots.
+
+Inputs and Outputs:
+    Reads:
+        - Persistent browser cookies and session state from browser-profile.
+        - Profile and tweet DOM elements on x.com.
+    Writes:
+        - Emits JSON summary of profile and recent posts to stdout.
+        - Appends timestamped audit record row to logs/impressions.csv.
+        - Prints diagnostic messages to stderr when profile is busy or logged out.
+
+Live Account Effects:
+    Opens persistent browser session, visits the profile page, and optionally
+    navigates up to 8 post analytics pages with randomized pauses (1.5-2.5s).
+    Read-only operation; does not post, follow, like, or mutate account state.
 """
 import os, time, random, json, csv, datetime, sys, re, atexit
 from playwright.sync_api import sync_playwright
@@ -15,6 +36,20 @@ USER = "first_sauce_lab"
 CSV = os.path.join(BOT, "logs", "impressions.csv")
 
 def num(s):
+    """Parse a human-readable metric string with K/M multipliers into an integer.
+
+    Handles numeric strings with commas, decimal points, and optional K/M
+    magnitude suffixes (e.g. '1.5K' -> 1500, '2M' -> 2000000).
+
+    Args:
+        s: Raw string representation of a count.
+
+    Returns:
+        Parsed integer value, or 0 if parsing fails.
+
+    Side effects:
+        None. Pure string parsing function.
+    """
     if not s:
         return 0
     s = s.strip().upper()
@@ -26,10 +61,26 @@ def num(s):
     return int(v * mult)
 
 def sum_post_impressions(page, arts):
-    """Fallback when X's 7-day banner is absent: visit each visible post's
-    /analytics page and sum its official Impressions figure. Returns
-    (formatted_sum, source_tag). Empty string means every page failed."""
+    """Calculate aggregate impressions by visiting individual post analytics pages.
+
+    Acts as a fallback when X's 7-day impressions banner is missing from the
+    profile header. Iterates through up to 8 visible post articles, visits each
+    post's /analytics URL, parses the Impressions metric, and sums them.
+
+    Args:
+        page: Playwright Page instance with active session.
+        arts: Playwright Locator representing visible tweet article elements.
+
+    Returns:
+        Tuple of (formatted_sum, source_tag), e.g. ('1.2K', 'SUM').
+        Returns ('', 'SUM') if all analytics pages fail.
+
+    Side effects:
+        Navigates page to up to 8 post /analytics pages, sleeps 1.5-2.5s per page,
+        and consumes X analytics page requests.
+    """
     total, n_ok = 0, 0
+    # Cap at 8 posts to keep analytics page crawling within a ~20s timeframe.
     for i in range(min(arts.count(), 8)):
         try:
             a = arts.nth(i)
@@ -137,13 +188,15 @@ with sync_playwright() as p:
 
     # per-post engagement
     arts = page.locator('article[data-testid="tweet"]')
+    # Sample up to 10 most recent posts to assess recent reach without excessive scrolling.
     n = min(arts.count(), 10)
     posts = []
     total_views = 0
     for i in range(n):
         try:
             a = arts.nth(i)
-            full = a.inner_text()  # full text — the stats row sits at the bottom
+            # Full inner text: engagement metrics row sits at the bottom of the article.
+            full = a.inner_text()
             links = a.locator('a[href*="/status/"]')
             href = links.first.get_attribute("href") if links.count() else ""
             m = re.search(r"/status/(\d+)", href or "")

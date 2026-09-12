@@ -1,24 +1,41 @@
 #!/usr/bin/env python3
 """Unfollow maintenance for @first_sauce_lab.
 
-Why this exists (2026-09-11, Rajat's call after Antigravity's reach audit):
+Why this exists (2026-09-11, Rajat's call after Antigravity reach audit):
 the account followed 250 accounts while having 26 followers. A visitor sees
-that ratio before they read a single post, and it reads as a follow-back
+that ratio before reading a single post, and it reads as a follow-back
 account. Follow-spread is now paused; this walks the following list down to a
 floor, keeping the builders the reply engine actually engages with.
 
-Rules:
-  - keep every handle in reply_guy.TARGETS (that is who we reply to)
-  - keep anyone the account follows who is NOT in the pool we spread into,
-    unless we run short of candidates -- deliberately conservative
-  - 18 unfollows a day by default, 15-45s randomized gap between each
-  - click, then CONFIRM the button flipped to "Follow" before counting it
-  - stop early once the following count reaches the floor
+Operational rules:
+    - Keep every handle in reply_guy.TARGETS (the accounts the bot replies to).
+    - Unfollow at most 18 accounts per run by default.
+    - Sleep 15-45s between unfollows to emulate human cadence.
+    - Click unfollow, confirm modal if prompted, and verify the button flipped.
+    - Stop early once the following count reaches the configured floor.
+    - Silent when idle or unsuccessful so scheduled runs do not create noise.
+      Prints a summary line only when accounts are unfollowed.
 
-Silent when it has nothing to do or nothing worked, so a no-op cron run sends
-no message. Prints one line only when it actually unfollowed someone.
+Invocation:
+    CLI or cron job:
+        python3 unfollow_maintenance.py [--max 18] [--floor 80] [--dry]
+    Specific cron schedule is not defined within this file.
 
-  python3 unfollow_maintenance.py [--max 18] [--floor 80] [--dry]
+Inputs and Outputs:
+    Reads:
+        - logs/unfollow_state.json (history of previously unfollowed handles).
+        - reply_guy.TARGETS (protected account handles).
+        - browser_guard lock and session status.
+        - Live X following page DOM elements.
+    Writes:
+        - logs/unfollow_state.json (records newly unfollowed handles).
+        - logs/unfollow.log (detailed execution and error log).
+        - stdout: prints run summary on changes or dry run.
+
+Live Account Effects:
+    Acquires browser lock via browser_guard, launches persistent browser context,
+    navigates to following page, clicks unfollow buttons, handles confirmation
+    prompts, sleeps between requests, and decrements following count.
 """
 import argparse
 import datetime
@@ -40,12 +57,28 @@ LOG = os.path.join(BOT, "logs", "unfollow.log")
 
 
 def log(line):
+    """Write timestamped log message to unfollow log file.
+
+    Args:
+        line: Message string to write.
+
+    Side effects:
+        Ensures directory exists and appends timestamped line to LOG.
+    """
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} {line}\n")
 
 
 def load_state():
+    """Load previously unfollowed accounts state from disk.
+
+    Returns:
+        Dict loaded from unfollow_state.json, or {'unfollowed': {}} on error.
+
+    Side effects:
+        Reads STATE file from disk if present.
+    """
     try:
         with open(STATE, encoding="utf-8") as f:
             return json.load(f)
@@ -54,13 +87,34 @@ def load_state():
 
 
 def save_state(st):
+    """Persist unfollowed accounts state to disk as JSON.
+
+    Args:
+        st: Dict containing unfollow tracking state.
+
+    Side effects:
+        Creates parent directory if missing and overwrites STATE file.
+    """
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     with open(STATE, "w", encoding="utf-8") as f:
         json.dump(st, f, indent=1)
 
 
 def read_following_count(page):
-    """'250 Following' -> 250, from the profile page."""
+    """Extract numeric Following count from user profile page.
+
+    Navigates to the profile page for HANDLE, waits for DOM content, and
+    parses the text of the following count anchor (handling K/M suffixes).
+
+    Args:
+        page: Playwright Page instance with active session.
+
+    Returns:
+        Integer count of accounts followed, or None if extraction failed.
+
+    Side effects:
+        Navigates page to profile URL, sleeps 3-5 seconds.
+    """
     page.goto(f"https://x.com/{HANDLE}", wait_until="domcontentloaded", timeout=60_000)
     rg.human_delay(3, 5)
     n = page.evaluate("""(h) => {
@@ -76,7 +130,19 @@ def read_following_count(page):
 
 
 def visible_following(page):
-    """[{handle, can_unfollow}] for the rows currently rendered."""
+    """Extract list of visible user handles and unfollow status from DOM.
+
+    Inspects rendered UserCell elements in the current DOM view.
+
+    Args:
+        page: Playwright Page instance loaded on following page.
+
+    Returns:
+        List of dicts: [{'handle': str, 'can_unfollow': bool}, ...].
+
+    Side effects:
+        Evaluates JavaScript in browser DOM without mutating page state.
+    """
     return page.evaluate("""() => {
         const out = [];
         for (const cell of document.querySelectorAll('[data-testid="UserCell"]')) {
@@ -92,16 +158,34 @@ def visible_following(page):
 
 
 def main():
+    """Execute unfollow maintenance pass to gradually lower following count.
+
+    Parses CLI arguments (--max, --floor, --dry), acquires browser mutex via
+    browser_guard, inspects current following count, and unfollows non-whitelisted
+    accounts until budget or floor is reached. Verifies each unfollow button flip.
+
+    Returns:
+        0 on success, dry run, or when following count is at or below floor.
+        1 on extraction failure or candidate exhaustion without unfollows.
+        2 on non-busy session classification failure.
+
+    Side effects:
+        Acquires and releases browser mutex, mutates live account following list,
+        sleeps 15-45 seconds between unfollow clicks, updates JSON state file,
+        appends to log file.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--max", type=int, default=18)
     ap.add_argument("--floor", type=int, default=80)
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
 
+    # Prevent concurrent browser instances from colliding on user profile data.
     if not browser_guard.hold("unfollow_maintenance"):
         log(f"stand down: profile busy ({browser_guard.busy_reason()})")
         return 0
 
+    # Whitelist reply targets so the bot maintains engagement with key accounts.
     keep = {h.lower() for h in rg.TARGETS}
     st = load_state()
     done = st.setdefault("unfollowed", {})
@@ -129,6 +213,7 @@ def main():
             ctx.close()
             return 0
 
+        # Bound unfollows to avoid sudden drops while respecting the configured floor.
         budget = min(a.max, n - a.floor)
         page.goto(f"https://x.com/{HANDLE}/following", wait_until="domcontentloaded",
                   timeout=60_000)
@@ -136,6 +221,7 @@ def main():
 
         tried = set()
         rounds = 0
+        # Cap scroll pagination at 12 rounds to avoid looping if list end is reached.
         while len(unfollowed) < budget and rounds < 12:
             rounds += 1
             rows = visible_following(page)
@@ -146,6 +232,7 @@ def main():
                           and r["handle"].lower() not in tried
                           and r["handle"].lower() != HANDLE]
             if not candidates:
+                # Scroll down ~2-3 viewports to trigger dynamic list item rendering.
                 page.mouse.wheel(0, 2200)
                 rg.human_delay(2, 3.5)
                 more = [r for r in visible_following(page)
@@ -202,7 +289,8 @@ def main():
             else:
                 log(f"FAIL @{h} (button did not flip)")
 
-            rg.human_delay(15, 45)  # deliberate, human-paced
+            # Deliberate 15-45s human-paced delay prevents triggering X bot detection.
+            rg.human_delay(15, 45)
 
         ctx.close()
 

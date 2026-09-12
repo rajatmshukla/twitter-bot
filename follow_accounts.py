@@ -4,11 +4,25 @@
 Discovery lever: a new account following 14 accounts is invisible. Following
 the real AI ecosystem (labs + the people the reply-guy engine already
 engages) puts the profile in front of that audience and unlocks normal X
-discovery. NOT follow-for-follow farming — these are accounts the bot
+discovery. NOT follow-for-follow farming: these are accounts the bot
 genuinely engages with every day via reply_guy.py.
 
-Usage: python3 follow_accounts.py [handle...]  (defaults to the reply-guy list)
-Run with python3 (WindowsApps). Logs to logs/follows.log.
+Invocation:
+    Run manually via CLI:
+        python3 follow_accounts.py [handle...]
+    Defaults to DEFAULT_HANDLES if no arguments are passed. Whether an
+    automated scheduler or cron invokes this script is not evident from
+    this file.
+
+Inputs and Outputs:
+    Reads: browser session cookies from browser_post.PROFILE, optional handle
+        arguments from CLI (sys.argv).
+    Writes: appends run logs to logs/follows.log, prints to stdout.
+
+Live Account Effects:
+    Interacts directly with live X account session: navigates to target user
+    profiles, clicks follow buttons and confirmation modals, and sleeps to
+    simulate human cadence. Consumes daily follow rate-limit budget on X.
 """
 import os, sys, time, random, datetime
 
@@ -29,15 +43,46 @@ DEFAULT_HANDLES = [
 ]
 
 def human_delay(a=1.5, b=3.5):
+    """Sleep for a randomized duration between a and b seconds.
+
+    Args:
+        a: Minimum sleep duration in seconds (default 1.5).
+        b: Maximum sleep duration in seconds (default 3.5).
+
+    Side effects:
+        Sleeps the executing thread to emulate human pause timing.
+    """
     time.sleep(random.uniform(a, b))
 
 def log(line):
+    """Write timestamped message to follows log file and stdout.
+
+    Args:
+        line: String message to record.
+
+    Side effects:
+        Appends to FOLLOW_LOG and prints to stdout.
+    """
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     with open(FOLLOW_LOG, "a", encoding="utf-8") as f:
         f.write(f"{ts} {line}\n")
     print(f"{ts} {line}")
 
 def main():
+    """Follow target handles sequentially via Playwright browser automation.
+
+    Resolves target handles from CLI arguments or DEFAULT_HANDLES. Launches a
+    persistent Chromium browser context using browser_post.PROFILE, verifies an
+    active authenticated session, navigates to each profile, and clicks the follow
+    button in the primary column. Verifies the button state flips to unfollow.
+
+    Returns:
+        0 on completion, 2 if browser session is not logged in.
+
+    Side effects:
+        Interacts with live X profile pages, clicks follow buttons, sleeps
+        between actions, consumes follow rate limits, and appends to FOLLOW_LOG.
+    """
     handles = sys.argv[1:] or DEFAULT_HANDLES
     followed, skipped, failed = [], [], []
     with sync_playwright() as p:
@@ -56,7 +101,7 @@ def main():
                 human_delay()
                 # The header follow button lives in the primary column; the
                 # right sidebar ("Who to follow") ALSO renders buttons whose
-                # testid ends in "-follow" — those are suggestions and must
+                # testid ends in "-follow": those are suggestions and must
                 # never be clicked. Scope to the primary column.
                 btn = page.locator(
                     '[data-testid="primaryColumn"] button[data-testid$="-follow"]').first
@@ -65,7 +110,8 @@ def main():
                     log(f"SKIP {h} (no header follow button / already following)")
                     continue
                 btn.click()
-                # verify the flip: the SAME button becomes "-unfollow"
+                # Verify the flip: the SAME button becomes "-unfollow". Poll up to
+                # 8 iterations (~8s total delay) to give the DOM time to update.
                 flipped = False
                 for _ in range(8):
                     human_delay(0.6, 1.2)
