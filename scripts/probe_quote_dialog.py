@@ -52,6 +52,11 @@ JS = """(sid) => {
 
 
 def main():
+    """Inspect the visible quote composer dialog for quoted tweet markers on x.com.
+
+    Drives headless Chromium to open the Quote dialog for an account post, inspects DOM
+    dialog elements, writes findings to tmp/quote_dialog_probe.json, and exits.
+    """
     rep = {}
     if not reply_guy.acquire_browser_lock():
         print("browser busy")

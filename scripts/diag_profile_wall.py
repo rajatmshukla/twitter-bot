@@ -19,6 +19,11 @@ SHOT = os.path.join(BOT, "tmp", "profile_wall.png")
 
 
 def main():
+    """Diagnose login state by loading x.com/home in a headless Chromium persistent context.
+
+    Inspects session cookies and visible page text to check for logout barriers.
+    Writes a page screenshot to tmp/profile_wall.png and prints diagnostic output to stdout.
+    """
     os.makedirs(os.path.dirname(SHOT), exist_ok=True)
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(

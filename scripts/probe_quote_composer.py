@@ -21,6 +21,11 @@ OUT = os.path.join(BOT, "tmp", "quote_composer_probe.json")
 
 
 def main():
+    """Inspect the quote composer DOM elements on x.com without publishing a post.
+
+    Drives headless Chromium to trigger the Quote flow on a recent account post, dumps
+    composer attachment state, saves findings to tmp/quote_composer_probe.json, and aborts.
+    """
     rep = {}
     if not reply_guy.acquire_browser_lock():
         print("browser busy")

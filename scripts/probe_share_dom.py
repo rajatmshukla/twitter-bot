@@ -44,6 +44,11 @@ def dump_menu(page, tag):
 
 
 def main():
+    """Inspect repost and quote DOM elements on x.com using a sample public post.
+
+    Drives headless Chromium to navigate to a target post, opens the repost menu and quote
+    composer, records selectors to tmp/share_dom_probe.json, and exits without posting.
+    """
     result = {"when": time.strftime("%Y-%m-%dT%H:%M:%S")}
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(

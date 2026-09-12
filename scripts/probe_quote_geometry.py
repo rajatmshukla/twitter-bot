@@ -59,6 +59,11 @@ JS = """(sid) => {
 
 
 def main():
+    """Inspect bounding box geometry and visibility of quote composer elements on x.com.
+
+    Drives headless Chromium to open the Quote dialog on an account post, extracts
+    DOM element coordinates and styles, writes them to tmp/quote_geometry_probe.json, and exits.
+    """
     rep = {}
     if not reply_guy.acquire_browser_lock():
         print("browser busy")

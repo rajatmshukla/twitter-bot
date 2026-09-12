@@ -35,6 +35,11 @@ def age_hours(dt):
 
 
 def main():
+    """Scrape allowlisted accounts via headless Chromium to find fresh quote-post candidates.
+
+    Drives Playwright across target profile pages, filters posts by age threshold, and prints
+    the top candidates to stdout. Writes all collected candidate records to tmp/share_targets.json.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=int, default=72)
     ap.add_argument("--limit", type=int, default=6)

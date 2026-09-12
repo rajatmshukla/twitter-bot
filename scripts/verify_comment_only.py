@@ -96,6 +96,11 @@ def verify_file(rel_path, repo_root):
 
 
 def main():
+    """Verify that Python files differ from git HEAD only by comments and docstrings.
+
+    Accepts file paths via CLI arguments or defaults to all tracked Python files.
+    Prints AST verification results per file along with a summary count to stdout.
+    """
     repo_root = os.path.abspath(
         subprocess.check_output(
             ["git", "rev-parse", "--show-toplevel"],

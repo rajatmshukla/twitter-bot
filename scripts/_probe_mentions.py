@@ -14,6 +14,11 @@ ME = "first_sauce_lab"
 from playwright.sync_api import sync_playwright
 
 def main():
+    """Launch headless Chromium to inspect x.com mentions for an authenticated session.
+
+    Loads the persistent browser profile, scrolls the mentions tab, and scrapes up to 15
+    tweet articles. Prints each extracted record as a JSON string to stdout.
+    """
     out = []
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(

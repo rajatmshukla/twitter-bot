@@ -34,6 +34,11 @@ def parse_count(s):
 
 
 def main():
+    """Scrape view counts and engagement rows from recent posts of the configured handle.
+
+    Drives headless Chromium via Playwright against live profile and post pages.
+    Saves extracted post statistics to tmp/post_views.json and prints a summary to stdout.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--max", type=int, default=8)
     a = ap.parse_args()

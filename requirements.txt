@@ -1,0 +1,4 @@
+# Third-party runtime dependencies for twitter-bot, verified and run under Python 3.12.
+playwright==1.62.0
+Pillow==12.3.0
+tweepy==4.17.0

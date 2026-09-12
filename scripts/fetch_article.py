@@ -1,6 +1,12 @@
+"""Fetch an article URL via HTTP and extract text content.
+
+Reads a target URL from command-line arguments, downloads the HTML, and extracts
+the meta description, JSON-LD article body, or visible paragraphs to stdout.
+"""
 import re, sys, urllib.request
 
 def fetch(url):
+    """Retrieve raw HTML content for a given URL using a standard browser user agent."""
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
     return urllib.request.urlopen(req, timeout=30).read().decode('utf-8', 'replace')
 

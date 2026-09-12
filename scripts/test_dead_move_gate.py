@@ -112,6 +112,10 @@ CLEAN_ENGINEERING_CORPUS = [
 
 
 def run_tests():
+    """Run regression tests validating DEAD_MOVE_RE and reply_guy_direct.gate().
+
+    Checks dead-move idiom rejection, legitimate text acceptance, and false positive rates.
+    """
     errors = []
 
     # 1. Assert every TEXTS_A item is rejected by both DEAD_MOVE_RE and gate()

@@ -17,6 +17,11 @@ from playwright.sync_api import sync_playwright
 
 
 def main():
+    """Publish a quote post to x.com and optionally verify its rendered permalink.
+
+    Drives headless Chromium via browser_share against a target tweet URL with a commentary
+    string. Writes execution status to tmp/share_posted.json and logs outcomes to stdout.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
     ap.add_argument("--comment", required=True)
