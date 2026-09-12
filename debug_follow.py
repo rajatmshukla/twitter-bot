@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
-"""Debug the follow button DOM on one profile."""
+"""Debug probe for follow button DOM states and click interaction behavior.
+
+Answers:
+    How do follow button data-testids, label text, and visibility change in the
+    DOM before and after clicking follow on a target profile?
+
+Invocation:
+    python debug_follow.py
+
+Inputs:
+    Hardcoded target profile: https://x.com/OpenAI.
+    Requires an active authenticated session in browser_post.PROFILE.
+
+Outputs:
+    Prints button counts, testids, inner text, and visibility before and after
+    click to standard output.
+
+Side effects:
+    Live mutation: clicks the follow button on @OpenAI, following or toggling
+    follow status for that account. Exits with status 2 if not authenticated.
+    It is not clear from this file if an automated scheduler triggers it.
+"""
 import os, sys, time
 BOT = r"C:\Users\Rajat\twitter-bot"
 sys.path.append(BOT)
@@ -19,6 +40,7 @@ with sync_playwright() as p:
     page.goto("https://x.com/OpenAI", wait_until="domcontentloaded", timeout=60_000)
     time.sleep(4)
     def dump(label):
+        """Log testid, label text, and visibility for follow-related buttons."""
         btns = page.locator('button')
         n = btns.count()
         print(f"--- {label}: {n} buttons ---")
@@ -28,7 +50,7 @@ with sync_playwright() as p:
                 txt = (btns.nth(i).inner_text() or "")[:40].replace("\n", " ")
                 print(f"  [{i}] testid={tid!r} text={txt!r} visible={btns.nth(i).is_visible()}")
     dump("BEFORE")
-    # try clicking the header-level follow button: testid ends with -follow
+    # Locate profile follow button whose data-testid ends with '-follow'
     btn = page.locator('button[data-testid$="-follow"]')
     print("match count:", btn.count())
     if btn.count():

@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
-"""Generate First Sauce Labs X post images — text-forward relatable cards.
+"""Generate First Sauce Labs X post images: text-forward relatable cards.
 
-Visual system: black canvas, neon-green accent (#3DFF6E), Bahnschrift headlines,
-Consolas kickers/captions. Two layouts: 'card' (kicker + big line + subline)
-and 'split' (two-panel meme with optional meter bar).
+Visual system: 1600x900 canvas, black background, neon-green accent (#3DFF6E),
+Arial Bold headlines (Bahnschrift variable font renders unreliably under PIL 12),
+Consolas monospace kickers and captions. Two layouts: 'card' (kicker, big line,
+subline) and 'split' (two-panel meme layout with optional progress meter bar).
 
-Usage: python3 gen_post_image.py            # generate whole batch
-       python3 gen_post_image.py <name>     # generate one card by name
-Output: C:/Users/Rajat/twitter-bot/assets/posts/<name>.png  (1600x900)
+Invocation:
+    python gen_post_image.py            # render entire batch
+    python gen_post_image.py <name>     # render single card by key
+
+Inputs:
+    Command-line arguments selecting card keys from BATCH dictionary.
+    Windows TrueType fonts loaded from C:\\Windows\\Fonts.
+
+Outputs:
+    PNG files written to C:/Users/Rajat/twitter-bot/assets/posts/<name>.png.
+
+Side effects:
+    Creates output directory assets/posts if missing and overwrites PNGs.
+    Exits with status 2 if any card fails border clearance checks.
+    It is not clear from this file if an automated scheduler triggers generation.
 """
 import os, sys, textwrap
 from PIL import Image, ImageDraw, ImageFont
@@ -27,13 +40,15 @@ GRAY = (138, 138, 138)
 DIM = (70, 70, 70)
 
 def font(name, size):
+    """Load TrueType font from Windows system directory at requested point size."""
     return ImageFont.truetype(os.path.join(FONTS, name), size)
 
-HEADLINE_FONT = "arialbd.ttf"   # static font — variable fonts (bahnschrift) render
+HEADLINE_FONT = "arialbd.ttf"   # static font: variable fonts (bahnschrift) render
                                 # unreliably under PIL 12 (drawn width != measured)
 MONO_FONT = "consola.ttf"
 
 def wrap(draw, text, fnt, max_w):
+    """Wrap text into lines bounded by rendered pixel width rather than char count."""
     words = text.split()
     lines, cur = [], ""
     for w_ in words:
@@ -49,15 +64,18 @@ def wrap(draw, text, fnt, max_w):
     return lines
 
 def draw_kicker(d, x, y, text):
+    """Draw green square accent and monospace kicker label above main headline."""
     d.rectangle([x, y + 14, x + 18, y + 26], fill=GREEN)
     f = font(MONO_FONT, 34)
     d.text((x + 34, y), text, font=f, fill=GRAY)
 
 def draw_caption(d, x, y, text, fill=DIM):
+    """Draw subtle footer caption string at specified canvas coordinate."""
     f = font(MONO_FONT, 28)
     d.text((x, y), text, font=f, fill=fill)
 
 def draw_headline(d, cx, y, lines, fnt, colors, max_w):
+    """Render multi-line centered headline and return ending vertical offset."""
     # cx is the CENTER x; left edge = cx - width/2  (NOT (cx - width)/2)
     for i, (line, col) in enumerate(zip(lines, colors)):
         lw = d.textlength(line, font=fnt)
@@ -66,6 +84,7 @@ def draw_headline(d, cx, y, lines, fnt, colors, max_w):
     return y
 
 def card(name, kicker, lines, colors, sub, caption="first sauce labs — lab notes"):
+    """Assemble single-card layout with top kicker, headline, and optional subline."""
     img = Image.new("RGB", (W, H), BLACK)
     d = ImageDraw.Draw(img)
     draw_kicker(d, 90, 80, kicker)
@@ -84,7 +103,11 @@ def card(name, kicker, lines, colors, sub, caption="first sauce labs — lab not
     return img
 
 def split(name, left_lines, right_lines, meter=None, caption="first sauce labs — lab notes"):
-    """meter: (label, pct) drawn under right panel as a fill bar."""
+    """Assemble two-panel meme comparison layout with optional meter bar.
+
+    The meter parameter takes a (label_str, fraction_float) tuple to render
+    a filled progress bar under the right-hand panel.
+    """
     img = Image.new("RGB", (W, H), BLACK)
     d = ImageDraw.Draw(img)
     d.rectangle([0, 0, W // 2, H], fill=PANEL_A)
@@ -221,8 +244,11 @@ BATCH = {
 }
 
 def verify_bounds(path, border=26):
-    """Check that no ink sits within `border` px of the canvas edge (overflow/clip).
-    Known allowed edge elements: green divider of split layouts (center, not edge)."""
+    """Verify that no drawn pixels intrude into the canvas boundary margin.
+
+    Checks outer margin on all four sides for non-background pixels to detect
+    unintended text overflow or element clipping before posting.
+    """
     im = Image.open(path).convert("RGB")
     w, h = im.size
     px = im.load()
@@ -239,6 +265,11 @@ def verify_bounds(path, border=26):
     return hits
 
 def main():
+    """Batch-render cards from BATCH dict, verify margins, and write PNG assets.
+
+    Accepts optional card names via sys.argv. If any card has non-divider
+    border hits, reports failure and exits with status 2.
+    """
     os.makedirs(OUT, exist_ok=True)
     names = sys.argv[1:] or list(BATCH)
     ok = True
@@ -250,7 +281,7 @@ def main():
         p = os.path.join(OUT, f"{n}.png")
         img.save(p)
         hits = verify_bounds(p)
-        # green divider at center (x=797..800) is by design; ignore it
+        # Split cards have a full-height green center divider crossing top/bottom margins
         real = [h for h in hits if not (795 <= h[0] <= 805)]
         status = "CLEAN" if not real else f"EDGE HITS {len(real)} e.g. {real[:3]}"
         if real:
