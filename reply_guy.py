@@ -100,9 +100,9 @@ def normalize_dashes(t):
 DEAD_MOVE_RE = re.compile(
     r"\bheavy lifting\b"
     r"|\b(?:is|are|was|were|be|been|being|keeps?|kept|has|have|had)\s+doing\s+"
-    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b"
+    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of |the )(?:work|the work)\b"
     r"|\b(?:do|does|doing|done)\s+"
-    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b",
+    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of |the )(?:work|the work)\b",
     re.I)
 
 # The same move without the idiom: open by quoting a phrase out of the tweet,

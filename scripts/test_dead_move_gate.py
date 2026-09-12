@@ -38,6 +38,8 @@ TEXTS_A = [
     'the byte-stable prefix is the real trick. the cache does the heavy lifting.',
     '"game changer" is doing a lot of work for a pricing announcement.',
     'the ellipses are doing a lot of emotional heavy lifting there',
+    "claude cowork is the honest name. like a coworker, it does the work while you're in another meeting, and you find out when it's too late to object.",
+    'the worker is doing the work of two threads',
 ] + ESCAPE_VARIANTS
 
 TEXTS_B = [
@@ -50,8 +52,6 @@ TEXTS_B = [
 ]
 
 SUBSTANTIVE_TAKES = [
-    "claude cowork is the honest name. like a coworker, it does the work while you're in another meeting, and you find out when it's too late to object.",
-    'the worker is doing the work of two threads',
 ]
 
 TEXTS_C = [
