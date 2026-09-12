@@ -31,6 +31,7 @@ sys.path.append(BOT)  # append, NOT insert: bot dir's queue.py must not shadow s
 
 import reply_guy as rg          # state helpers, session check, delays, PROFILE
 import reply_guy_direct as rgd  # voice SYSTEM, model chain, gate()
+from reply_guy_direct import QUOTE_OPENER_CAP
 
 ME = "first_sauce_lab"
 # The operator's own handle is excluded: replying to yourself is noise, and a
@@ -355,6 +356,12 @@ def main():
             continue
         if THANKS_OPENERS.match(take):
             continue  # gratitude openers read as goodwill farming
+        # one quote-opener per run, then the drafter has to find another shape
+        if (rg.PACKAGING_RE.search(take)
+                and sum(1 for _, p in takes if rg.PACKAGING_RE.search(p))
+                >= QUOTE_OPENER_CAP):
+            log(f"DROPPED (quote-opener quota spent): {m['id']}")
+            continue
         if any(take[:40].lower() == prev[:40].lower() for _, prev in takes):
             continue
         log(f"DRAFT via {mdl}: {m['id']} ({take[:80]})")
