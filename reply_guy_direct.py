@@ -4,11 +4,22 @@
 Replaces the agent-driven twitter-reply-guy cron (Rajat 2026-09-04: stop
 burning DeepSeek tokens on agent-context re-reads). This script:
   1. scrapes TARGET profiles + trending searches via reply_guy.py helpers
-  2. drafts takes with a direct OpenRouter :free model call (default
-     z-ai/glm-5.2:free, fallback chain) - tiny prompts, no agent context
+  2. drafts takes with direct LLM calls (Gemini/OpenRouter free chain/agy)
   3. code-gates each take (length, banned machine tells, catchphrases)
   4. posts up to 8 via browser_thread.post_one (proven reply flow)
   5. updates reply_guy_state.json exactly like the old flow
+
+Entered as a CLI script directly or invoked via reply_guy_direct_cron.py wrapper:
+  python reply_guy_direct.py
+
+Side effects:
+- Launches Chromium browser with persistent profile under browser-profile/.
+- Acquires and releases profile lock at logs/browser.lock.
+- Queries X network endpoints for profiles, searches, and status pages.
+- Makes outbound HTTP requests to LLM APIs (Gemini, OpenRouter) or runs agy CLI.
+- Reads and mutates state JSON at logs/reply_guy_state.json.
+- Appends execution records to logs/replies.log.
+- Publishes reply tweets to X via browser_thread.post_one.
 
 Cost: ~1 small API call per candidate instead of ~800k tokens of agent
 loop context per run. Zero $ on :free endpoints. Model override via env
@@ -414,6 +425,11 @@ def llm(prompt):
 
 
 def gate(txt):
+    """Filter and sanitize candidate draft text through safety and style gates.
+
+    Returns normalized text, or None if rejected by length, banned words,
+    or dead-move pattern checks.
+    """
     t = txt.strip()
     if not t:
         return None
@@ -448,6 +464,7 @@ def gate(txt):
 
 
 def draft_prompt(cand):
+    """Build the LLM prompt for drafting a reply to candidate tweet cand."""
     if cand.get("handle"):
         author = cand["handle"]
     else:
@@ -615,6 +632,7 @@ def post_batch(items):
 
 
 def main():
+    """Execute one complete reply run: scrape, draft, gate, and post."""
     if not KEY and not KEY_GEMINI:
         print("reply-guy direct: no API keys - add GOOGLE_API_KEY or OPENROUTER_API_KEY to hermes .env")
         return 1

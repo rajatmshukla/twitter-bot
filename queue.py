@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
-"""Queue management for drafts.
+"""Queue management for tweet drafts.
 
 Drafts live in drafts/ as individual .txt files, one tweet each.
-The generator (cron) writes them; post.py publishes them.
+The generator writes them; posting scripts (e.g. post.py) publish them.
 
-Usage:
-  python3 queue.py list          # list queued drafts
-  python3 queue.py add "text"    # add a draft
-  python3 queue.py count         # number of drafts
-  python3 queue.py next          # print the oldest draft text
+Entered as a CLI script via subcommands:
+  python3 queue.py list          # list queued drafts and previews
+  python3 queue.py add "text"    # write a new draft with timestamp
+  python3 queue.py count         # print number of queued drafts
+  python3 queue.py next          # print oldest draft text
+Also imported as a library by posting scripts (e.g. post.py, post_next.py).
+
+Side effects:
+- Creates and writes new draft .txt files under drafts/.
+- Reads draft .txt files from drafts/.
+- No browser launched, no network calls, no state JSON mutated, no posts published.
 """
 import os, sys, glob, datetime
 
 DRAFTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drafts")
 
 def list_drafts():
+    """Return sorted list of file paths for all draft .txt files in drafts/."""
     return sorted(glob.glob(os.path.join(DRAFTS_DIR, "*.txt")))
 
 def main():
+    """Parse CLI subcommand (list, add, count, next) and manage draft files."""
     cmd = sys.argv[1] if len(sys.argv) > 1 else "list"
     if cmd == "list":
         for p in list_drafts():

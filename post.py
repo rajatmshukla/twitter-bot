@@ -1,21 +1,46 @@
 #!/usr/bin/env python3
-"""Post a generated tweet to X via the API v2 (tweepy, OAuth 1.0a user context).
+"""Publish a single tweet to X via the official API v2 using tweepy.
 
-Modes:
-  --post       actually post (requires keys in .env)
-  --dry-run    print what would be posted, post nothing (default)
+Provides command-line tweet publishing using OAuth 1.0a user context.
+Enforces character limits, supports stdin or file inputs, and defaults to a safe
+dry-run mode unless explicitly instructed to publish.
 
-Requires a .env file with:
-  X_API_KEY=            (consumer key)
-  X_API_SECRET=         (consumer secret)
-  X_ACCESS_TOKEN=       (access token)
-  X_ACCESS_SECRET=      (access token secret)
+Invocation:
+- CLI:
+    python post.py --file <path> [--post] [--label <str>]
+    cat tweet.txt | python post.py [--post] [--label <str>]
+- May be called by automated scheduling scripts or cron pipelines to publish
+  pre-generated tweets via the official API v2.
 
-Tweet text is read from stdin (piped) or a file argument.
+Inputs / Reads:
+- Reads credentials from local .env file (X_API_KEY, X_API_SECRET,
+  X_ACCESS_TOKEN, X_ACCESS_SECRET).
+- Reads tweet text from the file path given by --file, or standard input.
+
+Outputs / Writes:
+- Appends audit logs to logs/posts.log for dry runs and live posts.
+
+Live X Account Impact:
+- When --post is passed with valid keys: publishes a public tweet to the
+  authenticated account and consumes X API v2 write budget.
+- When --post is omitted (default) or keys are missing: operates in dry-run
+  mode without making any network calls to X.
 """
 import os, sys, argparse, datetime
 
 def load_env(path=".env"):
+    """Parse key-value configuration pairs from a dotenv file.
+
+    Simple parser to read environment variables without external dependencies.
+    Ignores comments and empty lines.
+
+    Args:
+        path: File system path to the dotenv file (defaults to '.env').
+    Returns:
+        Dict mapping string keys to string values found in the file.
+    Side effects:
+        Reads file from disk if it exists.
+    """
     env = {}
     if os.path.exists(path):
         for line in open(path, encoding="utf-8"):
@@ -26,6 +51,18 @@ def load_env(path=".env"):
     return env
 
 def main():
+    """CLI entry point for validating and publishing a tweet via API v2.
+
+    Parses command-line arguments, validates tweet text length, checks for
+    required credentials, and either logs a dry-run or publishes to X via
+    tweepy.Client.create_tweet.
+
+    Returns:
+        Integer exit code: 0 on success or valid dry-run, 1 on error.
+    Side effects:
+        Reads stdin or disk file, appends audit entries to logs/posts.log,
+        and creates a public post on X when --post is specified with API keys.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--post", action="store_true", help="actually post (default is dry-run)")
     ap.add_argument("--file", help="read tweet text from file")

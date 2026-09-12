@@ -1,11 +1,31 @@
 #!/usr/bin/env python3
-"""Post the next queued draft. One tweet per run.
+"""FIFO draft queue consumer: post the next queued draft to X.
 
-Usage: python3 post_next.py [--post]
-  without --post: dry-run (default)
-  with --post:    actually publish (requires keys in .env)
+Finds the earliest draft file in the drafts/ directory in sorted filename order,
+pipes its contents into post.py as a subprocess, and deletes the draft file if
+posting (or dry-running) succeeds.
 
-Exit codes: 0 = posted/dry-ran OK, 1 = error, 2 = queue empty
+Invocation:
+- CLI / cron:
+    python post_next.py
+    python post_next.py --post
+- Typically scheduled via cron or task scheduler for periodic draft release.
+
+Inputs / Reads:
+- Reads draft files matching drafts/*.txt in lexicographical order.
+
+Outputs / Writes:
+- Deletes the consumed draft file on returncode 0 (in both dry-run and post modes).
+- Delegates logging to post.py, which writes to logs/posts.log.
+
+Live X Account Impact:
+- With --post: publishes a live tweet to the account via post.py and spends API quota.
+- Without --post (default): dry-run only, does not touch the live X account.
+
+Exit codes:
+- 0: Successfully posted or dry-ran.
+- 1: Subprocess error during posting.
+- 2: Queue is empty (no drafts found).
 """
 import os, sys, subprocess, glob, datetime
 
@@ -13,6 +33,17 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DRAFTS_DIR = os.path.join(BASE, "drafts")
 
 def main():
+    """Pop and publish the next pending draft from the drafts queue directory.
+
+    Scans drafts/*.txt sorted alphabetically, takes the first entry, passes its
+    text to post.py via subprocess, and removes the file if post.py exits with 0.
+
+    Returns:
+        Integer exit code: 0 if processed, 1 on subprocess failure, 2 if queue empty.
+    Side effects:
+        Reads and permanently deletes the earliest draft file in drafts/.
+        Executes post.py subprocess, potentially creating a live post on X.
+    """
     drafts = sorted(glob.glob(os.path.join(DRAFTS_DIR, "*.txt")))
     if not drafts:
         print(f"[{datetime.datetime.now().isoformat(timespec='seconds')}] queue empty")

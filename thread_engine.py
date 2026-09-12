@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
-"""Benchmark/teardown thread engine for @first_sauce_lab.
+"""Benchmark and teardown thread engine for @first_sauce_lab.
 
-Rajat's call 2026-09-11, after Antigravity's reach audit: the account's root
-posts were all second-hand news, which is the lowest-ranked content class on X
-and pulled ~9 views each. This engine writes the opposite kind of post — a
-first-person teardown of a model that actually dropped, in the first-sauce
-voice, as a short thread.
+Fetches factual model release metadata from HuggingFace and OpenRouter, compiles
+a verified fact bundle, and prompts an LLM (DeepSeek) to draft a 3-post teardown
+thread written in a dry, practitioner voice.
 
-THE RULE THAT MATTERS: this engine may only state numbers it actually fetched.
-Every draft is checked token-by-token against the fact bundle; a number that
-cannot be traced back to HuggingFace, OpenRouter or a page we fetched means
-the thread is thrown away, not posted. There is no fallback that invents a
-figure. Two failed checks and it refuses to post and says so.
+Integrity and number verification rule:
+Every number stated in the generated thread draft is verified against the fact
+bundle. Any ungrounded figure or hallucinated benchmark metric triggers rejection
+and retry. If numbers cannot be verified after retries, posting is refused.
 
-Facts come from:
-  - HuggingFace /api/models/<id>  (params, downloads, likes, license, created)
-  - OpenRouter   /api/v1/models   (context length, pricing) when listed
+Invocation:
+- CLI:
+    python thread_engine.py --model <hf_repo_id>           # dry-run
+    python thread_engine.py --auto                         # auto-select trending model, dry-run
+    python thread_engine.py --model <hf_repo_id> --post    # live post to X
+    python thread_engine.py --auto --post                  # auto-select trending model and post
+    python thread_engine.py --model <id> --post --allow-unsafe-style
+- Typically executed manually or scheduled via cron for automated teardowns.
 
-Dry by default. `--post` is required to actually publish.
+Inputs / Reads:
+- HuggingFace model API (https://huggingface.co/api/models/<id>).
+- OpenRouter models catalog (https://openrouter.ai/api/v1/models).
+- HuggingFace trending API via model_monitor module.
+- DeepSeek API key loaded via news_monitor.
+- Browser session data in browser-profile/.
 
-  python3 thread_engine.py --model Qwen/Qwen3-32B          # dry
-  python3 thread_engine.py --auto --post                   # newest drop, live
-  python3 thread_engine.py --model X --post --allow-unsafe-numbers
+Outputs / Writes:
+- Appends published thread IDs to logs/posts.log.
+- Browser profile state and cookies in browser-profile/.
+
+Live X Account Impact:
+- When --post is passed: publishes a multi-tweet thread (root post plus chained
+  replies) to @first_sauce_lab on X via Playwright browser automation.
+- Consumes DeepSeek API token budget on each drafting attempt.
+- When --post is omitted (default): runs in dry-run mode, publishing nothing to X.
 """
 import argparse
 import datetime
@@ -48,12 +61,29 @@ UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0"}
 
 
 def log(line):
+    """Append a timestamped event line to logs/posts.log.
+
+    Args:
+        line: Message string to log.
+    Side effects:
+        Creates log directory if missing and appends entry to logs/posts.log.
+    """
     os.makedirs(os.path.dirname(POSTS_LOG), exist_ok=True)
     with open(POSTS_LOG, "a", encoding="utf-8") as f:
         f.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} {line}\n")
 
 
 def fetch_json(url, timeout=25):
+    """Fetch and decode JSON data from an HTTP URL using standard library.
+
+    Args:
+        url: Remote endpoint URL string.
+        timeout: Socket timeout in seconds (defaults to 25).
+    Returns:
+        Parsed JSON data as a dict or list.
+    Side effects:
+        Performs network HTTP request.
+    """
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
@@ -62,7 +92,18 @@ def fetch_json(url, timeout=25):
 # ---------------------------------------------------------------- fact bundle
 
 def hf_facts(model_id):
-    """Whatever HuggingFace will tell us about this repo. No guesses."""
+    """Fetch model metadata from HuggingFace Hub API.
+
+    Extracts parameters, download counts, likes, license, architecture,
+    tensor counts, and creation timestamps. Never guesses missing fields.
+
+    Args:
+        model_id: HuggingFace repository identifier (e.g. 'Qwen/Qwen3-32B').
+    Returns:
+        Tuple of (facts_dict, error_string_or_None).
+    Side effects:
+        Performs HTTP GET to huggingface.co API.
+    """
     try:
         d = fetch_json(HF_MODEL.format(model_id))
     except Exception as e:
@@ -91,7 +132,17 @@ def hf_facts(model_id):
 
 
 def or_facts(model_id):
-    """OpenRouter listing for the same model, if it is on the platform."""
+    """Fetch context window and pricing metadata from OpenRouter API if listed.
+
+    Matches model_id against the OpenRouter model registry.
+
+    Args:
+        model_id: Model identifier to search on OpenRouter.
+    Returns:
+        Tuple of (facts_dict, error_string_or_None).
+    Side effects:
+        Performs HTTP GET to openrouter.ai API.
+    """
     try:
         data = fetch_json(OR_URL)
     except Exception as e:
@@ -125,7 +176,15 @@ def or_facts(model_id):
 
 
 def facts_text(f):
-    """Flat text used for both the prompt and the number check."""
+    """Format fact bundle dictionary into flat text for LLM prompting and checking.
+
+    Args:
+        f: Fact dictionary mapping metadata keys to values.
+    Returns:
+        Newline-delimited string of sorted 'key: value' lines.
+    Side effects:
+        None. Pure data transformation.
+    """
     lines = []
     for k, v in sorted(f.items()):
         if isinstance(v, list):
@@ -135,11 +194,17 @@ def facts_text(f):
 
 
 def add_intervals(facts):
-    """Turn fetched timestamps into fetched intervals.
+    """Compute elapsed day intervals from timestamps and insert into facts.
 
-    "the first four days" is arithmetic on createdAt, not an invented figure,
-    so the difference belongs in the bundle where the check can see it. Without
-    this, the gate rejects a true statement for being derived.
+    Calculates days since creation and days between creation and modification
+    so derived time intervals are grounded in facts and pass number verification.
+
+    Args:
+        facts: Fact dictionary containing hf_createdAt and hf_lastModified.
+    Returns:
+        Mutated fact dictionary with derived interval fields added.
+    Side effects:
+        None.
     """
     def parse(s):
         try:
@@ -158,6 +223,15 @@ def add_intervals(facts):
 
 
 def build_facts(model_id):
+    """Gather and merge facts from HuggingFace, OpenRouter, and time calculations.
+
+    Args:
+        model_id: HuggingFace repository identifier.
+    Returns:
+        Tuple of (facts_dict, list_of_error_strings).
+    Side effects:
+        Performs outbound HTTP queries to HuggingFace and OpenRouter.
+    """
     hf, hf_err = hf_facts(model_id)
     orf, or_err = or_facts(model_id)
     facts = dict(hf)
@@ -171,7 +245,16 @@ def build_facts(model_id):
 # ------------------------------------------------------------ candidate pick
 
 def pick_newest():
-    """Newest plausible frontier drop from HF trending."""
+    """Select the newest eligible model from HuggingFace trending list.
+
+    Filters models against allowed authors, variant exclusions, and minimum
+    download thresholds configured in model_monitor.
+
+    Returns:
+        Tuple of (model_id_str, error_str_or_None).
+    Side effects:
+        Fetches trending data over HTTP via model_monitor.
+    """
     import model_monitor as mm
     try:
         raw = mm.fetch(mm.TRENDING_URL)
@@ -233,6 +316,16 @@ Return ONLY JSON: {"posts": ["...", "...", "..."]}"""
 
 
 def _deepseek_call(prompt, max_tokens=900):
+    """Execute LLM completion call via DeepSeek API using news_monitor helper.
+
+    Args:
+        prompt: User prompt string containing system instructions and facts.
+        max_tokens: Maximum token limit for the response (defaults to 900).
+    Returns:
+        Tuple of (response_text_str, error_str_or_None).
+    Side effects:
+        Makes network request to DeepSeek API; spends API token budget.
+    """
     import news_monitor as nm
     key = nm.load_deepseek_key()
     if not key:
@@ -247,6 +340,17 @@ NUM_RE = re.compile(r"\d[\d,.]*")
 
 
 def numbers_in(text):
+    """Extract set of normalized number strings from text using regex.
+
+    Strips commas and edge punctuation from numeric patterns.
+
+    Args:
+        text: String to scan for numbers.
+    Returns:
+        Set of lowercase numeric strings found.
+    Side effects:
+        None. Pure parsing.
+    """
     out = set()
     for m in NUM_RE.findall(text):
         t = m.strip(".,").replace(",", "")
@@ -256,12 +360,20 @@ def numbers_in(text):
 
 
 def allowed_numbers(facts, model_id=""):
-    """Every number the draft is allowed to state.
+    """Derive all legitimate numerical tokens permissible in a thread draft.
 
     Not only the raw figures: a faithful rounding is fine ("67.5K downloads"
     for 67550), and a number that comes from the model's own name is fine
     ("2B" in MiniCPM5-2B). What stays blocked is any magnitude we never
-    fetched — which is exactly what an invented benchmark number looks like.
+    fetched, which is exactly what an invented benchmark number looks like.
+
+    Args:
+        facts: Verified fact dictionary.
+        model_id: Model repository string.
+    Returns:
+        Set of allowed string representations of numbers.
+    Side effects:
+        None.
     """
     allow = set(numbers_in(facts_text(facts)))
     allow |= numbers_in(model_id or "")
@@ -280,11 +392,18 @@ def allowed_numbers(facts, model_id=""):
 
 
 def has_symbol(p):
-    """First emoji/symbol in the post, or None.
+    """Return the first disallowed unicode symbol or emoji in post, or None.
 
     Written as an ord() walk instead of a regex escape table so the rule
     survives being edited by anything that mangles backslashes. Curly quotes
-    are allowed through; emoji, arrows, checkmarks and 🧵 are not.
+    are allowed through; emoji, arrows, checkmarks and thread symbols are not.
+
+    Args:
+        p: Single tweet draft text string.
+    Returns:
+        First offending character string, or None if text is clean.
+    Side effects:
+        None.
     """
     for ch in p:
         o = ord(ch)
@@ -301,7 +420,21 @@ COMPETITOR_RE = re.compile(r"\b(qwen|llama|gemma|mistral|gpt|claude|grok)\b", re
 
 
 def check_style(posts, facts, max_len=270):
-    """Things that read as bot output, break the platform, or invent context."""
+    """Validate thread drafts against formatting, length, and voice constraints.
+
+    Checks things that read as bot output, break the platform, or invent context:
+    length limits, emoji/symbols, hashtags, URLs, banned hype phrases, and
+    ungrounded competitor model mentions.
+
+    Args:
+        posts: List of tweet draft text strings.
+        facts: Fact dictionary.
+        max_len: Character limit per post (defaults to 270).
+    Returns:
+        List of violation description strings.
+    Side effects:
+        None.
+    """
     hay = facts_text(facts).lower()
     bad = []
     for i, p in enumerate(posts, 1):
@@ -330,12 +463,18 @@ def check_style(posts, facts, max_len=270):
 
 
 def sanitize(posts):
-    """Mechanical repairs, applied before validation.
+    """Apply mechanical repairs to drafts before validation.
 
-    Rajat's rule is no em or en dashes. Swapping one for a comma changes no
-    fact and no meaning, so it is repaired instead of rejected — otherwise the
-    engine burns its retries on a punctuation habit. Everything else (emoji,
-    hashtags, invented numbers, outside comparisons) is still rejected.
+    Swaps em/en dashes for commas, removes stray emoji or unicode symbols,
+    and collapses repeated commas and whitespace. Avoids burning retries
+    on harmless punctuation habits.
+
+    Args:
+        posts: List of raw draft strings.
+    Returns:
+        List of sanitized draft strings.
+    Side effects:
+        None.
     """
     out = []
     for p in posts:
@@ -357,8 +496,16 @@ def sanitize(posts):
 def trim_to(p, limit=270):
     """Cut an over-long post back to the limit at a clean boundary.
 
-    Called only when the model overshoots, which DeepSeek does most runs. This
-    loses a clause; it never invents one, and it never cuts mid-word.
+    Called only when the model overshoots, which DeepSeek does frequently.
+    Truncates at a clause or sentence boundary; never cuts mid-word.
+
+    Args:
+        p: Post text string exceeding character limit.
+        limit: Target maximum character length (defaults to 270).
+    Returns:
+        Shortened string cleanly terminated with punctuation.
+    Side effects:
+        None.
     """
     if len(p) <= limit:
         return p
@@ -376,10 +523,17 @@ def trim_to(p, limit=270):
 def check_numbers(posts, facts, model_id=""):
     """Numbers in the draft that cannot be traced back to the facts.
 
-    Matching is by number, not by substring. An earlier version also accepted
-    any number that appeared anywhere inside the flattened fact text, which let
-    "7B+" through because some digit 7 existed in a dataset name. A magnitude
-    the draft asserts has to be a magnitude we actually fetched.
+    Matching is by full numeric token, not by substring, ensuring asserted
+    magnitudes were genuinely fetched.
+
+    Args:
+        posts: List of draft tweet strings.
+        facts: Verified fact dictionary.
+        model_id: Model repository identifier.
+    Returns:
+        Sorted list of unauthorized number strings found.
+    Side effects:
+        None.
     """
     allow = allowed_numbers(facts, model_id)
     bad = []
@@ -391,6 +545,20 @@ def check_numbers(posts, facts, model_id=""):
 
 
 def draft_thread(facts, model_id, allow_unsafe=False):
+    """Generate and validate a 3-post teardown thread using DeepSeek LLM.
+
+    Iterates up to 3 attempts with corrective feedback if numbers fail
+    verification or style rules are violated. Number checking is never bypassed.
+
+    Args:
+        facts: Fact dictionary.
+        model_id: Model repository identifier string.
+        allow_unsafe: If True, relaxes style checks but enforces number checks.
+    Returns:
+        Tuple of (list_of_posts, error_string_or_None).
+    Side effects:
+        Calls DeepSeek API up to 3 times; consumes API token budget.
+    """
     base = (f"FACTS\n{facts_text(facts)}\n\n"
             f"TASK: write the 3-post teardown thread for {model_id}.")
     prompt, err = base, None
@@ -425,6 +593,17 @@ def draft_thread(facts, model_id, allow_unsafe=False):
 
 
 def _parse_posts(out):
+    """Parse list of post strings from LLM JSON completion output.
+
+    Handles JSON array of strings or array of dicts with text/post/content keys.
+
+    Args:
+        out: Raw string response from LLM.
+    Returns:
+        List of extracted post text strings, or empty list on failure.
+    Side effects:
+        None.
+    """
     m = re.search(r"\{.*\}", out, re.S)
     if not m:
         return []
@@ -446,6 +625,16 @@ def _parse_posts(out):
 # ------------------------------------------------------------------- posting
 
 def latest_post_id(page, handle):
+    """Scrape newest status ID from user profile page via Playwright.
+
+    Args:
+        page: Playwright Page instance with active browser session.
+        handle: Account username string without '@'.
+    Returns:
+        Status ID string if found in profile timeline, else None.
+    Side effects:
+        Navigates browser to user profile; sleeps 3 to 5 seconds.
+    """
     page.goto(f"https://x.com/{handle}", wait_until="domcontentloaded", timeout=60_000)
     browser_thread.human_delay(3, 5)
     return page.evaluate("""(h) => {
@@ -458,7 +647,17 @@ def latest_post_id(page, handle):
 
 
 def as_id(result):
-    """post_one's return shape has varied; take an id out of whatever it gives."""
+    """Extract a numeric tweet status ID string from post_one return value.
+
+    Normalizes various return shapes (string, tuple, list) into a status ID.
+
+    Args:
+        result: Return value from browser_thread.post_one.
+    Returns:
+        Numeric status ID string, or None if unrecognized.
+    Side effects:
+        None.
+    """
     if isinstance(result, str) and result.isdigit():
         return result
     if isinstance(result, (list, tuple)):
@@ -469,6 +668,19 @@ def as_id(result):
 
 
 def post_thread(posts):
+    """Publish a chained thread to X via headless Playwright browser automation.
+
+    Acquires browser lock via browser_guard, verifies session authentication,
+    posts root tweet, and sequentially posts each reply chained to previous ID.
+
+    Args:
+        posts: List of post text strings in thread sequence.
+    Returns:
+        List of published tweet status ID strings, or empty list on failure.
+    Side effects:
+        Publishes public tweets to live X account. Paces requests with delays
+        (3 to 6 seconds between posts). Spends no X API budget.
+    """
     if not browser_guard.hold("thread_engine"):
         print(f"stand down: profile busy ({browser_guard.busy_reason()})")
         return 0
@@ -507,6 +719,18 @@ def post_thread(posts):
 
 
 def main():
+    """CLI orchestrator for fetching model facts, drafting thread, and posting.
+
+    Parses CLI flags, resolves model ID, fetches facts from HuggingFace and
+    OpenRouter, invokes LLM drafting loop, runs validation gates, and publishes
+    via Playwright when --post is specified.
+
+    Returns:
+        Exit code integer: 0 on success or dry-run, 1 on error or refused draft.
+    Side effects:
+        Fetches external API data, consumes LLM tokens, and may publish live
+        tweets to X if --post is passed.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default=None, help="HF repo id")
     ap.add_argument("--auto", action="store_true", help="pick newest trending drop")

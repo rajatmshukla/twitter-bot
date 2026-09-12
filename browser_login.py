@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
-"""Log into X once so the bot can post from a persistent browser session.
+"""Interactive login utility to establish persistent browser session for X.
 
-Opens a real (headed) Chromium window with a persistent profile. YOU log in
-manually (type your credentials yourself — the script never sees them). Once
-you're logged in and see your home timeline, close the window. The session is
-saved in the profile and reused by browser_post.py.
+Opens a headed Chromium window with a persistent profile directory where the
+operator manually logs in. The script never inspects or stores credentials.
+Once login succeeds and the home timeline loads, the session is saved in the
+profile directory and reused by automated posting modules (browser_post.py,
+browser_share.py, browser_thread.py).
 
-Usage: python3 browser_login.py
+Invocation:
+- CLI (manual operator only):
+    python browser_login.py
+- Never invoked automatically via cron or background jobs because it requires
+  manual interaction in a headed browser window.
+
+Inputs / Reads:
+- Interactive operator keyboard and mouse input in the headed browser.
+- Reads home timeline DOM to check for authenticated navigation elements.
+
+Outputs / Writes:
+- Creates and updates persistent browser profile files in browser-profile/
+  (cookies, local storage, session state).
+
+Live X Account Impact:
+- Read-only. Does not publish posts, retweets, or modify profile settings.
+- Establishes authenticated session state for subsequent posting scripts.
 """
 import os, sys, time
 
@@ -16,6 +33,20 @@ BOT = r"C:\Users\Rajat\twitter-bot"
 PROFILE = os.path.join(BOT, "browser-profile")
 
 def main():
+    """Launch headed browser for manual operator login and verify session.
+
+    Opens a headed Chromium window pointing to the X login page and waits up to
+    180 seconds for the user to complete login and reach the home feed.
+    After the window closes, runs check_session() in headless mode to verify.
+
+    Arguments:
+        None.
+    Returns:
+        None.
+    Side effects:
+        Launches a visible browser window, writes authentication state to
+        browser-profile/, and prints progress to stdout. Does not post to X.
+    """
     os.makedirs(PROFILE, exist_ok=True)
     print("Opening X login in a real browser window...")
     print("LOG IN YOURSELF. When you see your home timeline, close the window.")
@@ -43,10 +74,20 @@ def main():
         print("WARNING: could not verify session. Try again and make sure you reach the home timeline.")
 
 def check_session():
-    """Reliable check: logged-in-only DOM marker (SideNav_NewTweet_Button).
+    """Verify that the saved browser profile holds an active logged-in session.
 
-    The old URL-only check (`\"login\" not in url`) is NOT trustworthy — a
-    logged-out x.com/ splash contains no \"login\" and falsely reports OK.
+    Launches a headless browser context, loads the home timeline, and waits for
+    the tweet composer button (SideNav_NewTweet_Button). The URL check
+    ('login' not in url) is untrustworthy because the logged-out splash page
+    does not contain 'login' in its URL.
+
+    Arguments:
+        None.
+    Returns:
+        True if the logged-in sidebar button is detected, False otherwise.
+    Side effects:
+        Launches and closes a headless Chromium context. Navigates to
+        https://x.com/home and sleeps 3 seconds. Spends no API budget.
     """
     try:
         with sync_playwright() as p:

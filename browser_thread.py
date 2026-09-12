@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Post a threaded post (tweet thread) via the X web UI (browser automation).
 
+Entered as a CLI script:
+  python3 browser_thread.py --file thread.txt    -> post thread from file
+  python3 browser_thread.py --check              -> verify login session
+Also imported as a library by reply_guy, reply_guy_direct, mentions_guy, and
+thread_engine for its post_one subroutine.
+
 Thread file format: plain text, tweet parts separated by a line containing
 exactly <<<BREAK>>>. Example:
 
@@ -10,9 +16,12 @@ exactly <<<BREAK>>>. Example:
   <<<BREAK>>>
   part three.
 
-Usage:
-  python3 browser_thread.py --file thread.txt
-  python3 browser_thread.py --check
+Side effects:
+- Launches Chromium browser with persistent profile under browser-profile/.
+- Navigates and submits form data on X web endpoints.
+- Appends execution records to logs/threads.log.
+- Saves diagnostic screenshots to logs/unsure_*.png on unconfirmed submissions.
+- Publishes tweets, reply threads, or standalone updates to X.
 
 Exit codes: 0 posted fully, 2 not logged in, 3 blocked/error, 4 file issue
 """
@@ -24,9 +33,11 @@ BOT = r"C:\Users\Rajat\twitter-bot"
 PROFILE = os.path.join(BOT, "browser-profile")
 
 def human_delay(a=1.0, b=2.5):
+    """Pause execution for a random duration between a and b seconds."""
     time.sleep(random.uniform(a, b))
 
 def log(line):
+    """Append timestamped message to threads.log and print to stdout."""
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     print(f"[{ts}] {line}")
     with open(os.path.join(BOT, "logs", "threads.log"), "a", encoding="utf-8") as f:
@@ -45,6 +56,7 @@ def composer_box(page):
     return page.locator('[data-testid="tweetTextarea_0"]').last
 
 def post_button(page):
+    """Return locator for the post submit button (dialog-first)."""
     dialog = page.locator('[role="dialog"]')
     if dialog.count():
         return dialog.locator('[data-testid="tweetButton"]')
@@ -177,6 +189,7 @@ def post_one(page, text, reply_to=None):
     return tid
 
 def main():
+    """Parse CLI arguments, verify session or post thread from file."""
     global USER
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", default=None)

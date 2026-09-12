@@ -13,6 +13,19 @@ Flow:
   5. post via the proven browser_thread.post_one reply flow
   6. record answered ids in logs/mentions_state.json
 
+Entered as a CLI script directly or invoked periodically via cron wrapper:
+  python mentions_guy.py
+
+Side effects:
+- Launches Chromium browser with persistent profile under browser-profile/.
+- Acquires and releases profile lock at logs/browser.lock.
+- Queries X network endpoints for mentions tab and parent tweet context.
+- Makes outbound HTTP requests to LLM APIs via reply_guy_direct.
+- Reads and mutates state JSON at logs/mentions_state.json.
+- Appends execution records to logs/mentions.log.
+- Updates session health records at logs/session_health.json.
+- Publishes reply tweets to X via browser_thread.post_one.
+
 Volume note: this account gets ~1-2 genuine outside mentions a WEEK, so the
 engine is mostly silent. That is expected, not a bug. It prints nothing when
 there is nothing to answer, which is what a no_agent cron needs.
@@ -90,6 +103,7 @@ THEIR REPLY by @{author}:
 
 
 def log(line):
+    """Append timestamped message to MENTIONS_LOG and print to stderr."""
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     try:
         with open(MENTIONS_LOG, "a", encoding="utf-8") as f:
@@ -100,6 +114,7 @@ def log(line):
 
 
 def load_state():
+    """Load JSON state mapping answered and failed tweet IDs, or return default."""
     try:
         return json.load(open(STATE_FILE, encoding="utf-8"))
     except Exception:
@@ -107,12 +122,14 @@ def load_state():
 
 
 def save_state(st):
+    """Persist state dict containing answered and failed IDs to STATE_FILE."""
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(st, f, indent=1)
 
 
 def is_junk(text):
+    """Return a reason string if text matches spam/abuse/bare-handle, else None."""
     low = text.lower()
     # A mention that is nothing but our own handle has no content to answer;
     # tagging the account with no words is not a conversation opener.
@@ -255,6 +272,7 @@ def post_batch(items):
 
 
 def main():
+    """Execute mentions workflow: scrape notifications, draft replies, and post."""
     # Another engine may be using the shared X profile; retry on the next slot.
     if not rg.acquire_browser_lock("mentions_guy"):
         import browser_guard

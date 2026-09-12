@@ -1,34 +1,55 @@
 #!/usr/bin/env python3
-"""Repost and quote-tweet via the X web UI. No API keys.
+"""Repost and quote-tweet via the X web UI without API keys.
 
-Everything below was learned from live probes on 2026-09-11
-(scripts/probe_share_dom.py, probe_quote_composer.py, probe_quote_geometry.py,
-probe_quote_dialog.py; raw dumps in tmp/*probe*.json):
+Automates reposting, undoing reposts, quote-tweeting, checking repost status,
+and searching posts via Playwright on a persistent Chromium browser profile.
 
-  action bar   [data-testid="retweet"]   aria-label "<N> reposts. Repost"
-               after reposting, the SAME control becomes [data-testid="unretweet"]
-               and the aria-label flips to "<N> reposts. Reposted". That flip is
-               the only trustworthy confirmation: the toast did not render at all
-               on 3 of 4 successful reposts.
-  menu         [role="menu"] with [role="menuitem"] rows:
-                 "Repost"      -> data-testid="retweetConfirm"
-                 "Undo repost" -> data-testid="retweetConfirm" (same testid)
-                 "Quote"       -> NO data-testid; match innerText == "Quote"
-  quote page   x.com/compose/post, quoted post inside [data-testid="attachments"]
-               The quoted card renders WITHOUT an <a href>, so the quoted status
-               id never appears in the dialog HTML, and the status page sits
-               behind the composer, so a document-wide id search is meaningless.
-               Real markers instead:
-                 - the comment label reads "Add a comment" (quote mode only)
-                 - the attachments chip text starts with "Quote" and names @author
-               WARNING: the page carries TWO composers. Both pass Playwright's
-               ':visible' (the hidden twin has a real box parked at y=951 in a
-               900px viewport), and the hidden twin's button is the DISABLED one.
-               Pick by in-viewport geometry only: in_viewport().
-  after post   toast "Your post was sent." + the URL returns to the status page
-               and the composer dialog disappears.
+Invocation:
+- CLI:
+    python browser_share.py repost <status_url>
+    python browser_share.py undo <status_url>
+    python browser_share.py quote <status_url> [--file <path> | --text <str>]
+    python browser_share.py state <status_url>
+    python browser_share.py search <query>
+    python browser_share.py check
+- Imported by other automation scripts or queue runners that need repost or
+  quote capabilities (e.g. interactive workflows or scheduled tools).
 
-Exit codes (CLI): 0 ok, 2 not logged in, 3 selector/page problem, 4 unsure.
+Inputs / Reads:
+- Reads X web pages (status URLs, profile feeds, search results).
+- Reads comment text from CLI flags or UTF-8 text files on disk.
+- Reads browser session state via browser_post.check_session().
+
+Outputs / Writes:
+- Appends execution log entries to logs/browser_post.log via browser_post.log().
+- Mutates browser profile cookies, cache, and session data under browser-profile/.
+
+Live X Account Impact:
+- 'repost': Publishes a public repost of the target tweet from the account.
+- 'undo': Deletes the account's existing repost of the target tweet.
+- 'quote': Publishes a new public quote-tweet on the account containing the comment
+  and referencing the target tweet.
+
+DOM and geometry notes (learned from live probes on 2026-09-11; raw dumps in tmp/):
+- Action bar: [data-testid="retweet"] aria-label "<N> reposts. Repost".
+  After reposting, the SAME control flips to [data-testid="unretweet"] and
+  aria-label "<N> reposts. Reposted". This flip is the only reliable confirmation;
+  toasts failed to render in 3 of 4 successful repost probes.
+- Menu: [role="menu"] with [role="menuitem"] rows:
+    "Repost" -> data-testid="retweetConfirm"
+    "Undo repost" -> data-testid="retweetConfirm" (same testid)
+    "Quote" -> NO data-testid; matched by innerText == "Quote"
+- Quote page: x.com/compose/post, quoted post inside [data-testid="attachments"].
+  The quoted card has no <a> link with status ID. Key markers:
+    * Comment label reads "Add a comment"
+    * Attachments chip text begins with "Quote" and mentions @author
+  WARNING: The page renders TWO composers. Both pass Playwright's ':visible'
+  selector (the hidden twin sits below the fold at y=951 in a 900px viewport
+  with a disabled button). Use in_viewport() to target the active composer.
+- After post: Toast "Your post was sent." appears, dialog closes, and URL returns
+  to the status page.
+
+CLI exit codes: 0 ok, 2 not logged in, 3 selector/page problem, 4 unsure.
 """
 import argparse
 import os
@@ -53,19 +74,43 @@ MAX_QUOTE_CHARS = 250  # X counts punctuation heavier than python len; 250 is th
 
 
 def human_delay(a=1.0, b=2.2):
+    """Sleep for a randomized interval between a and b seconds.
+
+    Paces browser interactions to mimic human typing and browsing timing.
+    Args:
+        a: Minimum sleep duration in seconds.
+        b: Maximum sleep duration in seconds.
+    Side effects:
+        Blocks current thread for the duration.
+    """
     time.sleep(random.uniform(a, b))
 
 
 def log(line):
+    """Write an execution record to the browser log file via browser_post.
+
+    Args:
+        line: Message string to append.
+    Side effects:
+        Appends a timestamped line to logs/browser_post.log.
+    """
     browser_post.log(line)
 
 
 def in_viewport(page, selector):
-    """First match of `selector` whose box is actually inside the viewport.
+    """Find first element matching selector whose bounding box is inside viewport.
 
-    Playwright's ':visible' is NOT enough on the compose page: the hidden twin
-    sits below the fold with a real box, so ':visible' matches both. Geometry
-    is the only reliable split. Returns an ElementHandle or None.
+    Playwright's ':visible' check is insufficient on the compose page because
+    a hidden secondary composer sits below the fold (y=951 in a 900px viewport)
+    with non-zero dimensions. Geometry comparison is required.
+
+    Args:
+        page: Playwright Page instance.
+        selector: CSS selector string to query.
+    Returns:
+        Playwright ElementHandle inside the viewport, or None if none found.
+    Side effects:
+        Executes JavaScript in the browser page context.
     """
     h = page.evaluate_handle("""(sel) => {
       for (const el of document.querySelectorAll(sel)) {
@@ -81,7 +126,18 @@ def in_viewport(page, selector):
 # ---------------------------------------------------------------- primitives
 
 def retweet_state(page):
-    """"reposted", "not", or None when neither button renders."""
+    """Determine whether the current status page is already reposted.
+
+    Queries the DOM for the retweet or unretweet testid buttons.
+
+    Args:
+        page: Playwright Page loaded on an X status URL.
+    Returns:
+        "reposted" if unretweet is present, "not" if retweet is present,
+        or None when neither control renders.
+    Side effects:
+        Executes JavaScript in the browser page context.
+    """
     return page.evaluate("""() => {
       if (document.querySelector('[data-testid="unretweet"]')) return "reposted";
       if (document.querySelector('[data-testid="retweet"]')) return "not";
@@ -90,6 +146,15 @@ def retweet_state(page):
 
 
 def retweet_aria(page):
+    """Read the aria-label attribute of the retweet or unretweet button.
+
+    Args:
+        page: Playwright Page loaded on an X status URL.
+    Returns:
+        String aria-label (e.g. '12 reposts. Repost'), or None if missing.
+    Side effects:
+        Executes JavaScript in the browser page context.
+    """
     return page.evaluate("""() => {
       const el = document.querySelector('[data-testid="unretweet"]')
               || document.querySelector('[data-testid="retweet"]');
@@ -98,7 +163,17 @@ def retweet_aria(page):
 
 
 def wait_state(page, want, timeout=14):
-    """Poll the repost control until it reaches `want` or the timeout expires."""
+    """Poll the repost control until it reaches want or the timeout expires.
+
+    Args:
+        page: Playwright Page instance.
+        want: Target state string ("reposted" or "not").
+        timeout: Maximum polling duration in seconds.
+    Returns:
+        Current state string reached, or last observed state on timeout.
+    Side effects:
+        Polls the DOM every 1.5 seconds, blocking the calling thread.
+    """
     end = time.time() + timeout
     st = None
     while time.time() < end:
@@ -110,7 +185,16 @@ def wait_state(page, want, timeout=14):
 
 
 def open_status(page, url):
-    """Load a status page and wait for its action bar. True when ready."""
+    """Load a status page and wait for its action bar.
+
+    Args:
+        page: Playwright Page instance.
+        url: Full URL or status path (e.g. '/user/status/123').
+    Returns:
+        True if the action bar rendered with retweet controls, False otherwise.
+    Side effects:
+        Navigates page, sleeps 2.0 to 3.5 seconds, waits up to 20s for DOM.
+    """
     if not url.startswith("http"):
         url = "https://x.com" + url
     page.goto(url, wait_until="domcontentloaded", timeout=60_000)
@@ -123,7 +207,15 @@ def open_status(page, url):
 
 
 def open_repost_menu(page):
-    """Click the repost control and return the menu's item labels."""
+    """Click the repost action bar button and return available dropdown options.
+
+    Args:
+        page: Playwright Page instance with an active status bar.
+    Returns:
+        List of trimmed text labels for menu items found in the menu dropdown.
+    Side effects:
+        Clicks the retweet/unretweet button in the DOM, sleeps, waits for menu.
+    """
     btn = page.locator(
         '[data-testid="unretweet"]:visible, [data-testid="retweet"]:visible').first
     btn.click()
@@ -138,6 +230,13 @@ def open_repost_menu(page):
 
 
 def close_menu(page):
+    """Dismiss any open popup or dropdown menu by pressing the Escape key.
+
+    Args:
+        page: Playwright Page instance.
+    Side effects:
+        Sends keyboard Escape event to page, sleeps 0.8 seconds.
+    """
     try:
         page.keyboard.press("Escape")
         time.sleep(0.8)
@@ -146,7 +245,16 @@ def close_menu(page):
 
 
 def click_menu_item(page, label):
-    """Click a menu row by exact-ish label text. True when clicked."""
+    """Click a menu row matching the specified label text case-insensitively.
+
+    Args:
+        page: Playwright Page instance with an open menu.
+        label: Target label text to match (e.g. "Quote").
+    Returns:
+        True if matching row was found and clicked, False otherwise.
+    Side effects:
+        Clicks an element in the browser DOM.
+    """
     for mi in page.locator('[role="menu"] [role="menuitem"]').all():
         try:
             txt = (mi.inner_text() or "").strip()
@@ -159,10 +267,18 @@ def click_menu_item(page, label):
 
 
 def click_confirm_row(page, prefer_testid=True):
-    """Click the menu's confirm row (Repost or its Undo twin).
+    """Click the menu confirm row (Repost or Undo repost).
 
     Both rows carry data-testid="retweetConfirm", which is exact and immune to
-    label drift, so it is tried first. Returns True when a click was issued.
+    label drift, so it is tried first before fallback text inspection.
+
+    Args:
+        page: Playwright Page instance with open repost menu.
+        prefer_testid: If True, attempts data-testid click first.
+    Returns:
+        True when a click was successfully dispatched, False otherwise.
+    Side effects:
+        Clicks an element in the browser DOM.
     """
     if prefer_testid:
         try:
@@ -182,6 +298,16 @@ def click_confirm_row(page, prefer_testid=True):
 
 
 def toast_text(page, timeout=6_000):
+    """Wait for a confirmation toast notification and return its text content.
+
+    Args:
+        page: Playwright Page instance.
+        timeout: Maximum milliseconds to wait for the toast element.
+    Returns:
+        Extracted toast text string, or None if no toast appears.
+    Side effects:
+        Waits for DOM selector, blocking execution up to timeout.
+    """
     try:
         page.wait_for_selector('[data-testid="toast"]', timeout=timeout)
         return page.evaluate(
@@ -191,7 +317,17 @@ def toast_text(page, timeout=6_000):
 
 
 def new_id_from_toast(page):
-    """The toast's View link points at the freshly created post."""
+    """Extract newly published tweet status ID from the confirmation toast link.
+
+    The toast's View link points directly at the freshly created post.
+
+    Args:
+        page: Playwright Page instance displaying a confirmation toast.
+    Returns:
+        Numeric status ID string if found in toast anchor href, else None.
+    Side effects:
+        Queries the browser DOM via JavaScript evaluation.
+    """
     try:
         href = page.evaluate("""() => {
           const a = document.querySelector('[data-testid="toast"] a[href*="/status/"]');
@@ -210,8 +346,15 @@ def wait_quote_landed(page, timeout=16):
     """Poll for the settled signals that a quote was published.
 
     Two independent markers, both observed 2026-09-11: the toast, and the
-    composer dialog disappearing with the URL off /compose/. Returns the state
-    dict, or None when neither appeared.
+    composer dialog disappearing with the URL off /compose/.
+
+    Args:
+        page: Playwright Page instance where quote was submitted.
+        timeout: Maximum polling duration in seconds.
+    Returns:
+        State dict with 'toast', 'dialogs', 'url', or None on timeout.
+    Side effects:
+        Polls DOM every 1.5 seconds, blocking execution up to timeout.
     """
     end = time.time() + timeout
     while time.time() < end:
@@ -231,7 +374,19 @@ def wait_quote_landed(page, timeout=16):
 
 
 def own_newest_posts(page, handle, limit=6):
-    """[{id, text}] for the account's own newest posts, newest first."""
+    """Fetch recent post IDs and text from the account timeline.
+
+    Used to verify publication after ambiguous toast or dialog outcomes.
+
+    Args:
+        page: Playwright Page instance.
+        handle: Account username string without '@'.
+        limit: Maximum number of recent posts to collect.
+    Returns:
+        List of dicts [{'id': str, 'text': str}], ordered newest first.
+    Side effects:
+        Navigates browser to user profile URL and sleeps 4 seconds.
+    """
     page.goto(f"https://x.com/{handle}", wait_until="domcontentloaded", timeout=60_000)
     time.sleep(4)
     return page.evaluate("""([h, limit]) => {
@@ -253,7 +408,17 @@ def own_newest_posts(page, handle, limit=6):
 
 
 def search_posts(page, query, limit=10):
-    """Top-sorted X search results: [{handle, id, url, when, text}]. Read-only."""
+    """Collect top-sorted X search results matching query. Read-only.
+
+    Args:
+        page: Playwright Page instance.
+        query: Search term or query expression string.
+        limit: Maximum number of search result articles to return.
+    Returns:
+        List of dicts [{'handle', 'id', 'url', 'when', 'text'}].
+    Side effects:
+        Navigates browser to search URL, sleeps 3 to 5 seconds. Does not post.
+    """
     page.goto(f"https://x.com/search?q={urlquote(query)}&f=top",
               wait_until="domcontentloaded", timeout=60_000)
     human_delay(3, 5)
@@ -284,12 +449,21 @@ def search_posts(page, query, limit=10):
 # ------------------------------------------------------------------ actions
 
 def repost(page, status_url, attempts=2):
-    """Repost a post. Returns (ok, note).
+    """Repost a post via the web UI.
 
     Two attempts: on 2026-09-11 a click that followed a menu-open + Escape in
     the same page silently failed (no toast, no state change), while the same
     call on a freshly loaded page worked. The retry is safe because it only
     fires when the state still reads "not".
+
+    Args:
+        page: Playwright Page instance.
+        status_url: URL or path of the target post to repost.
+        attempts: Maximum number of full repost attempts.
+    Returns:
+        Tuple of (ok: bool, note: str).
+    Side effects:
+        Publishes a live repost to X. Modifies account state. Spends no API budget.
     """
     notes = []
     for i in range(1, attempts + 1):
@@ -320,7 +494,17 @@ def repost(page, status_url, attempts=2):
 
 
 def undo_repost(page, status_url, attempts=2):
-    """Undo an existing repost. Returns (ok, note)."""
+    """Undo an existing repost via the web UI.
+
+    Args:
+        page: Playwright Page instance.
+        status_url: URL or path of the target post whose repost is undone.
+        attempts: Maximum number of undo attempts.
+    Returns:
+        Tuple of (ok: bool, note: str).
+    Side effects:
+        Deletes a repost on X. Modifies account state. Spends no API budget.
+    """
     notes = []
     for i in range(1, attempts + 1):
         if not open_status(page, status_url):
@@ -350,7 +534,19 @@ def undo_repost(page, status_url, attempts=2):
 
 
 def quote_attached(page, handle):
-    """Evidence that the in-viewport composer is in QUOTE mode for `handle`."""
+    """Verify that the in-viewport composer is configured in quote mode for handle.
+
+    Checks the dialog label ('Add a comment') and the attachments card
+    referencing the target author handle.
+
+    Args:
+        page: Playwright Page instance with active composer.
+        handle: Expected tweet author handle (without '@').
+    Returns:
+        Dict with 'ok' (bool), 'label' (str), and 'attachments' (str).
+    Side effects:
+        Executes JavaScript DOM inspection in the browser page context.
+    """
     return page.evaluate("""(handle) => {
       const inView = el => {
         const r = el.getBoundingClientRect();
@@ -372,12 +568,23 @@ def quote_attached(page, handle):
 
 
 def quote(page, status_url, comment, dry=False):
-    """Quote-post with a comment. Returns (ok, note, new_id).
+    """Quote-post with a comment via the web UI.
 
-    Publishes a real post unless dry=True. The comment is capped at
+    Publishes a live post on X unless dry=True. The comment is capped at
     MAX_QUOTE_CHARS. The post is NEVER retried on an ambiguous result: a blind
     retry risks a duplicate, so an inconclusive click is resolved by looking for
     a new post on the profile, and only then reported as UNSURE.
+
+    Args:
+        page: Playwright Page instance.
+        status_url: URL or path of the target post to quote.
+        comment: Text string to publish as the quote commentary.
+        dry: If True, stages and types the quote without clicking post.
+    Returns:
+        Tuple of (ok: bool, note: str, new_id: str | None).
+    Side effects:
+        Publishes a live quote-tweet on the authenticated X account (unless dry).
+        Paces input with randomized delays. Spends no API budget.
     """
     comment = (comment or "").strip()
     if not comment:
@@ -447,6 +654,17 @@ def quote(page, status_url, comment, dry=False):
 # ---------------------------------------------------------------------- CLI
 
 def main():
+    """CLI entry point to repost, undo, quote, inspect state, or search.
+
+    Parses command line arguments, launches Chromium persistent context,
+    checks login status, and executes the specified action.
+
+    Returns:
+        Integer exit code: 0 on success, 2 if not logged in, 3 on selector or
+        URL error, 4 if action status is inconclusive.
+    Side effects:
+        Launches browser, queries or publishes to X, and appends log records.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=["repost", "undo", "quote", "state", "search", "check"])
     ap.add_argument("url", nargs="?", default=None, help="status url (or search query)")

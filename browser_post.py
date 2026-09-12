@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""Post a tweet via the X web UI (browser automation), using the persistent
-session created by browser_login.py. No API keys needed.
+"""Post a tweet via the X web UI (browser automation).
 
-Usage:
-  python3 browser_post.py "tweet text"
-  python3 browser_post.py --file drafts/xxx.txt
-  python3 browser_post.py --check          # verify session, post nothing
+Uses the persistent browser profile created by browser_login.py.
 
-Exit codes: 0 posted, 2 not logged in, 3 blocked/captcha, 4 other error
+Entered as a CLI script:
+  python3 browser_post.py "tweet text"     -> post text string directly
+  python3 browser_post.py --file path.txt  -> post text from file
+  python3 browser_post.py --check          -> verify session, post nothing
+Also imported as a library by posting scripts (e.g. post.py, post_next.py).
+
+Side effects:
+- Launches Chromium browser with persistent profile under browser-profile/.
+- Acquires and releases profile lock at logs/browser.lock.
+- Navigates and submits tweet forms on X home page.
+- Appends execution records to logs/posts.log.
+- Publishes tweets and uploads media attachments to X.
+
+Exit codes: 0 posted, 2 not logged in, 3 blocked/captcha, 4 other error, 5 busy
 """
 import os, sys, time, random, argparse, datetime
 
@@ -17,9 +26,11 @@ BOT = r"C:\Users\Rajat\twitter-bot"
 PROFILE = os.path.join(BOT, "browser-profile")
 
 def human_delay(a=1.0, b=2.5):
+    """Pause execution for a random duration between a and b seconds."""
     time.sleep(random.uniform(a, b))
 
 def log(line):
+    """Append timestamped message to posts.log and print to stdout."""
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     print(f"[{ts}] {line}")
     with open(os.path.join(BOT, "logs", "posts.log"), "a", encoding="utf-8") as f:
@@ -38,6 +49,11 @@ def check_session(page):
     return browser_guard.check_session(page)
 
 def post_text(page, text, image_path=None):
+    """Post tweet text and optional image using the home inline composer.
+
+    Returns exit code integer: 0 on success, 2 on logged out, 3 on composer
+    missing or media upload failure, 4 on unconfirmed post status.
+    """
     # X's /compose/post page is unstable (2026-08-24: hidden duplicate dialog +
     # mask overlay + unsent-draft restore sheets). The home inline composer is
     # reliable; Ctrl+Enter submits without needing a button click.
@@ -99,6 +115,7 @@ def post_text(page, text, image_path=None):
             return 4
 
 def main():
+    """Parse CLI options, acquire browser lock, and post tweet or check session."""
     ap = argparse.ArgumentParser()
     ap.add_argument("text", nargs="?", default=None)
     ap.add_argument("--file", default=None)

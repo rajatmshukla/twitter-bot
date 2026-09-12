@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""One shared guard for the X browser profile. Two jobs:
+"""Shared lock and session classifier for the persistent X browser profile.
 
+Two primary responsibilities:
 1. THE LOCK. Every engine that opens twitter-bot/browser-profile must hold
    logs/browser.lock first. Two Chromium instances on one profile do not
    queue, they corrupt the session: the loser lands on a logged-out page and
@@ -14,7 +15,6 @@
    browser_post, browser_thread) and a fix applied to one did not reach the
    others, so "NOT LOGGED IN" kept coming back. classify_session() replaces
    all of them and separates two things that used to look identical:
-
      dead  - the login is genuinely gone (no auth_token cookie, or a redirect
              to /i/flow/login). Action required: browser_login.py.
      busy  - the login is fine, the page just has not hydrated yet, usually
@@ -23,9 +23,18 @@
 
    Only "dead" deserves a red cron alert.
 
-Self-test:
-  python3 browser_guard.py            # lock round-trip, no browser
-  python3 browser_guard.py --session  # live verdict + markers
+Entered as a library imported by reply_guy, reply_guy_direct, mentions_guy,
+browser_post, and browser_thread. Also entered as a CLI script for diagnostics:
+  python3 browser_guard.py            # lock round-trip self-test, no browser
+  python3 browser_guard.py --session  # live verdict and UI markers
+
+Side effects:
+- Creates, writes, and removes lock file at logs/browser.lock.
+- Reads and updates health metrics at logs/session_health.json.
+- Queries OS process table for live PID status.
+- Inspects cookies and DOM markers on active Playwright page contexts.
+- Launches Chromium browser with persistent profile when run with --session.
+- Does not publish posts or mutate tweet state.
 """
 import os, sys, time, json, datetime
 
@@ -45,6 +54,7 @@ HEALTH_FILE = os.path.join(BOT, "logs", "session_health.json")
 
 
 def _load_health():
+    """Load health state dict from HEALTH_FILE, or return empty dict."""
     try:
         return json.load(open(HEALTH_FILE, encoding="utf-8"))
     except Exception:
@@ -52,6 +62,7 @@ def _load_health():
 
 
 def _save_health(h):
+    """Save health state dict h to HEALTH_FILE."""
     try:
         os.makedirs(os.path.dirname(HEALTH_FILE), exist_ok=True)
         with open(HEALTH_FILE, "w", encoding="utf-8") as f:
@@ -143,6 +154,7 @@ def holder():
 
 
 def lock_age():
+    """Return age of LOCK_FILE in seconds, or None if file does not exist."""
     try:
         return time.time() - os.path.getmtime(LOCK_FILE)
     except OSError:
@@ -177,6 +189,7 @@ def acquire(name="engine", force=False):
 
 
 def release():
+    """Release profile lock by removing LOCK_FILE if held by this process."""
     # Only the holder clears it: a late finisher must not free a lock another
     # process has since taken.
     who = holder()
@@ -212,6 +225,7 @@ def busy_reason():
 # session verdict
 # --------------------------------------------------------------------------
 def _has_auth_cookie(page):
+    """Return True if AUTH_COOKIE exists and has non-empty value in page context."""
     try:
         for c in page.context.cookies("https://x.com"):
             if c.get("name") == AUTH_COOKIE and c.get("value"):
@@ -320,6 +334,7 @@ def check_session(page, tries=3):
 
 # --------------------------------------------------------------------------
 def _selftest():
+    """Run lock round-trip tests with child process to verify mutual exclusion."""
     print("== lock ==")
     assert holder() is None or True
     got = acquire("selftest")
@@ -349,6 +364,7 @@ def _selftest():
 
 
 def _session_test():
+    """Launch browser, run classify_session on live profile, and print verdict."""
     sys.path.append(BOT)
     from playwright.sync_api import sync_playwright
     import browser_post
