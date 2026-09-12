@@ -4,7 +4,7 @@
 Validates that:
 1. Idiom / dead-move takes (TEXTS_A) are rejected by both DEAD_MOVE_RE and gate().
 2. Legitimate takes (TEXTS_B) pass gate().
-3. Technical engineering replies with bare 'work' (TEXTS_C) pass gate().
+3. Technical engineering replies with bare 'work' and substantive 'the work' (TEXTS_C) pass gate().
 4. A clean engineering corpus of >= 30 replies (including work-stealing,
    worker-pool, query-planner, and GC-thread phrasing) has a 0% false positive rate.
 
@@ -49,13 +49,18 @@ TEXTS_B = [
     'a benchmark account hyping a model is a new one. a tenth of a point is inside run-to-run noise on most of these.',
 ]
 
+SUBSTANTIVE_TAKES = [
+    "claude cowork is the honest name. like a coworker, it does the work while you're in another meeting, and you find out when it's too late to object.",
+    'the worker is doing the work of two threads',
+]
+
 TEXTS_C = [
     'how does work stealing perform under NUMA topology with 64 cores?',
     'the worker does work in batches to minimize mutex contention.',
     'speculative decoding does work on draft tokens that get rejected 30% of the time.',
     'the team is doing work on formal verification for the crypto primitives.',
     'the runtime has done work to stabilize thread affinity across NUMA nodes.',
-]
+] + SUBSTANTIVE_TAKES
 
 CLEAN_ENGINEERING_CORPUS = [
     # Work-stealing phrasing

@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Reply-guy engine for First Sauce Labs: scrape big AI accounts, post takes.
+"""Scrape target AI accounts and trending topics on X, and post reply takes.
 
-Modes:
-  scrape                     -> print JSON candidates (tweets not yet seen/replied)
-  reply <tweet_id> -f f.txt  -> post file text as a reply to that tweet
-  state                      -> show replied/seen counts
+Entered as a CLI script via subcommands:
+  python reply_guy.py scrape                     -> print JSON candidates (tweets not yet seen/replied)
+  python reply_guy.py reply <tweet_id> -f f.txt  -> post file text as a reply to that tweet
+  python reply_guy.py trending                   -> print JSON candidates from top AI search queries
+  python reply_guy.py state                      -> print replied and seen tweet counts
+  python reply_guy.py verify <handle> ...        -> check if target handles exist and have visible posts
+Also imported as a library by reply_guy_direct.py for dead-move regexes, state, and browser helpers.
 
-State file: logs/reply_guy_state.json  ({"seen": {handle: [ids]}, "replied": [ids]})
-Read-only scrape; the only write action is reply (posts to X).
+Side effects:
+- Launches Chromium browser with persistent profile under browser-profile/.
+- Queries X network endpoints for user timelines and search queries.
+- Reads and updates state JSON at logs/reply_guy_state.json.
+- Appends execution records to logs/replies.log.
+- Publishes reply tweets to X when cmd_reply is executed.
 """
 import os, re, sys, json, time, random, argparse, datetime
 from urllib.parse import quote
@@ -93,9 +100,9 @@ def normalize_dashes(t):
 DEAD_MOVE_RE = re.compile(
     r"\bheavy lifting\b"
     r"|\b(?:is|are|was|were|be|been|being|keeps?|kept|has|have|had)\s+doing\s+"
-    r"(?:a lot of |all of the |most of the |some of the |too much |the |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b"
+    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b"
     r"|\b(?:do|does|doing|done)\s+"
-    r"(?:a lot of |all of the |most of the |some of the |too much |the |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b",
+    r"(?:a lot of |all of the |most of the |some of the |too much |some |so much |much |a ton of |a huge amount of |an enormous amount of |a great deal of )(?:work|the work)\b",
     re.I)
 
 # The same move without the idiom: open by quoting a phrase out of the tweet,
@@ -108,6 +115,7 @@ PACKAGING_RE = re.compile(
 
 
 def human_delay(a=1.0, b=2.5):
+    """Pause execution for a random duration between a and b seconds."""
     time.sleep(random.uniform(a, b))
 
 # ---- single-instance guard for the shared X profile ----
@@ -132,16 +140,19 @@ def acquire_browser_lock(name="reply_guy"):
 
 
 def release_browser_lock():
+    """Release the shared browser profile lock via browser_guard."""
     import browser_guard
     browser_guard.release()
 
 def log(line):
+    """Append timestamped message to REPLY_LOG and print to stderr."""
     ts = datetime.datetime.now().isoformat(timespec="seconds")
     with open(REPLY_LOG, "a", encoding="utf-8") as f:
         f.write(f"{ts} {line}\n")
     print(f"[{ts}] {line}", file=sys.stderr)
 
 def load_state():
+    """Load JSON state mapping seen and replied tweet IDs, or return default structure."""
     if os.path.exists(STATE_FILE):
         try:
             return json.load(open(STATE_FILE, encoding="utf-8"))
@@ -150,6 +161,7 @@ def load_state():
     return {"seen": {}, "replied": []}
 
 def save_state(st):
+    """Persist state dict containing seen and replied tweet IDs to STATE_FILE JSON."""
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(st, f, indent=1)
@@ -245,6 +257,11 @@ def scrape_search(page, query, live=False):
     return out
 
 def cmd_trending():
+    """Scrape top AI search queries on X and print JSON candidates to stdout.
+
+    Filters out already replied or seen tweets and limits output to MAX_TRENDING.
+    Returns 0 on success, or 2 if session check fails.
+    """
     st = load_state()
     replied = set(st.get("replied", []))
     seen_trending = set(st.get("seen", {}).get("_trending", []))
@@ -278,6 +295,11 @@ def cmd_trending():
     return 0
 
 def cmd_scrape():
+    """Scrape target accounts for fresh candidate tweets and print JSON.
+
+    Filters out already replied or seen tweets and updates state file.
+    Returns 0 on success, or 2 if session check fails.
+    """
     st = load_state()
     seen = st.get("seen", {})
     replied = set(st.get("replied", []))
@@ -314,6 +336,7 @@ def cmd_scrape():
     return 0
 
 def _is_fresh(dt):
+    """Return True if ISO datetime dt is within FRESH_HOURS of current UTC time."""
     try:
         t = datetime.datetime.fromisoformat(dt.replace("Z", "+00:00"))
         age = datetime.datetime.now(datetime.timezone.utc) - t
@@ -322,6 +345,11 @@ def _is_fresh(dt):
         return True
 
 def cmd_reply(tid, text_file):
+    """Publish text from text_file as a reply to tweet ID tid.
+
+    Validates length and passes dead-move gates before posting via browser_thread.
+    Returns 0 on success, 2 on session failure, 3 on post failure, 4 on bad input.
+    """
     text = open(text_file, encoding="utf-8").read().strip()
     if not text:
         log("ERROR: empty reply text")
@@ -365,6 +393,7 @@ def cmd_reply(tid, text_file):
     return 0
 
 def cmd_state():
+    """Print count of replied tweets and counts of seen tweets per handle."""
     st = load_state()
     print(f"replied: {len(st.get('replied', []))}")
     for h, ids in st.get("seen", {}).items():
@@ -393,6 +422,7 @@ def cmd_verify(handles):
     return 0
 
 def main():
+    """Parse CLI arguments and dispatch to command subroutines."""
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["scrape", "reply", "state", "verify", "trending"])
     ap.add_argument("tweet_id", nargs="?", default=None)
